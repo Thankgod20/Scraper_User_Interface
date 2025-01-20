@@ -1,101 +1,147 @@
-import Image from "next/image";
-
+'use client';
+import React, { useEffect, useState } from "react";
+import Header from '@/components/Header';
+import AboutToGraduateSection from '@/components/AbtGrd';
+import NewlyCreatedSection from '@/components/NewlyCreated';
+interface Impression {
+  name: string;
+  value: number;
+}
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [addresses, setAddresses] = useState<{ address: string; }[]>([]);
+  const [metadata, setMetadata] = useState<{ name: string; symbol: string; uri: string }[]>([]);
+  const [othermetadata, setOtherMetadata] = useState<{ name: string; symbol: string; description: string; image: string; showName: boolean; createdOn: string; twitter: string; telegram: string; website: string }[]>([]);
+  const [impressionsData, setImpressionsData] = useState<Impression[][]>([]);
+  const [usernames, setUsernames] = useState<string[][]>([]);
+  const [tweets, setTweets] = useState<string[][]>([]);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
+  const parseViewsCount = (views: string): number => {
+    if (views.endsWith('K')) {
+      return parseFloat(views) * 1000; // Convert "2K" to 2000
+    } else if (views.endsWith('M')) {
+      return parseFloat(views) * 1000000; // Convert "1M" to 1000000
+    }
+    return parseFloat(views); // For plain numbers
+  };
+  useEffect(() => {
+    // Fetch the JSON file
+    fetch("http://localhost:3300/addresses/address.json")
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((data) => { setAddresses(data) })
+      .catch((error) => console.error("Failed to fetch addresses:", error));
+  }, []);
+
+  useEffect(() => {
+
+    const fetchMetadata = async () => {
+      const fetchedMetadata: { name: string; symbol: string; uri: string }[] = [];
+      for (const address of addresses) {
+        // console.log("addresses", addresses, "address", address.address)
+        try {
+          const response = await fetch(`http://localhost:3300/api/token-metadata?mint=${address.address}`);
+          const data = await response.json();
+          fetchedMetadata.push(data);
+
+        } catch (error) {
+          console.error('Error fetching token metadata:', error);
+        }
+      };
+      setMetadata((prevMetadata) => [...prevMetadata, ...fetchedMetadata]);
+    }
+    fetchMetadata();
+
+  }, [addresses]);
+
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      const fetchedOtherMetadata: { name: string; symbol: string; description: string; image: string; showName: boolean; createdOn: string; twitter: string; telegram: string; website: string }[] = [];
+      for (const metadata_ of metadata) {
+        if (!metadata_?.uri) {
+          console.error('Metadata URI is missing');
+          return;
+        }
+        try {
+          const response = await fetch(metadata_.uri);
+          const data = await response.json();
+          //setOtherMetadata(data)
+          fetchedOtherMetadata.push(data);
+        } catch (error) {
+          console.error('Error fetching token metadata:', error);
+        }
+      }
+      setOtherMetadata((prevMetadata) => [...prevMetadata, ...fetchedOtherMetadata]);
+    };
+
+    fetchMetadata();
+  }, [metadata]);
+  useEffect(() => {
+    const fetchData = async () => {
+      const extractedNestedUsernames: string[][] = [];
+      const extractedNestedTweets: string[][] = [];
+      const impressionNestedArry: Impression[][] = []
+      for (const address of addresses) {
+        const response = await fetch(`http://localhost:3300/fetch-data?search=${address}`); // Load the JSON data
+        const jsonData = await response.json();
+
+        // Process data to calculate total views for each unique time
+        const viewCounts: { [key: string]: number } = {};
+        const extractedUsernames: string[] = [];
+        const extractedTweets: string[] = [];
+        jsonData.forEach((entry: any) => {
+          const times = entry.params.time;
+          const views = entry.params.views;
+          const statusUrl = entry.status;
+          const username = statusUrl.split('https://x.com/')[1].split('/status/')[0];
+
+          extractedUsernames.push("@" + username);
+          const tweets = entry.tweet;
+          extractedTweets.push(tweets)
+          times.forEach((time: number, index: number) => {
+            const view = parseViewsCount(views[index])//parseInt(views[index], 10);
+            const timeKey = `${time} min`;
+
+            if (viewCounts[timeKey]) {
+              viewCounts[timeKey] += view;
+            } else {
+              viewCounts[timeKey] = view;
+            }
+          });
+        });
+        extractedNestedUsernames.push(extractedUsernames)
+        extractedNestedTweets.push(extractedTweets)
+        // Convert the viewCounts object into an array
+        const impressionsArray = Object.entries(viewCounts).map(([name, value]) => ({
+          name,
+          value
+        }));
+        impressionNestedArry.push(impressionsArray)
+      }
+      setImpressionsData(impressionNestedArry);
+      setUsernames(extractedNestedUsernames);
+      setTweets(extractedNestedTweets)
+    };
+
+    fetchData();
+  }, [addresses]);
+  return (
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col">
+      {/* Header */}
+      <Header />
+
+      {/* Main Content */}
+      <main className="flex-grow p-4">
+        {/* About to Graduate Section */}
+        <AboutToGraduateSection addresses={addresses} othermetadata={othermetadata} usrname={usernames} tweets={tweets} impressionsData={impressionsData} />
+
+        {/* Newly Created Section */}
+
+        <NewlyCreatedSection addresses={addresses} othermetadata={othermetadata} usrname={usernames} tweets={tweets} impressionsData={impressionsData} />
       </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }

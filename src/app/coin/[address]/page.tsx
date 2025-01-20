@@ -1,0 +1,328 @@
+//pages.tsx
+"use client"
+import Chart from '@/components/Chart';
+import TradeCard from '@/components/TradeCard';
+import MetricsGrid from '@/components/MetricsGrid';
+import TopTweets from '@/components/TopTweets';
+import { useParams } from "next/navigation";
+import { useMetadata } from '@/context/MetadataContext';
+import React, { useEffect, useState } from "react";
+import { CandlestickData } from 'lightweight-charts';
+import TVChart from '@/components/TVChart';
+//import { TVChartContainer } from '@/components/AdvChart';
+import TVChartContainer from '@/components/AdvChart';
+import Script from 'next/script';
+import { CandleData, RawTradeData } from '@/app/types/TradingView';
+//import AdvChart from '@/components/AdvChart';
+interface Impression {
+  name: string;
+  value: number;
+}
+export default function Home() {
+  const { address }: { address: string } = useParams();
+  const { metadata } = useMetadata();
+  const [manualMetadata, setManualMetadata] = useState<{ name: string; symbol: string; uri: string }>();
+  const [allMetadata, setAllMetadata] = useState<{ name: string; symbol: string; description: string; image: string; showName: boolean; createdOn: string; twitter: string; telegram: string; website: string }>();
+  //console.log("metadata", metadata, metadata?.twitter)
+  const [impressionsData, setImpressionsData] = useState<Impression[]>([]);
+  const [engaments, setEngamentData] = useState<Impression[]>([]);
+  const [tweetPerMinute, setTweetsPerMinuteData] = useState<Impression[]>([]);
+  const [emojiRawData, setEmojiRawData] = useState<{ em_time: number, emoji: string }[]>([]);
+  const [usernames, setUsernames] = useState<string[]>([]);
+  const [tweets, setTweets] = useState<string[]>([]);
+  const [likes, setLikes] = useState<string[]>([]);
+  const [viewscount, setViewCount] = useState<string[]>([]);
+  const [time, setTime] = useState<string[]>([]);
+  const [profile, setProfile] = useState<string[]>([]);
+
+  const [chartData, setChartData] = useState<RawTradeData[]>([]);
+  const [totalchartData, setTotalChartData] = useState<RawTradeData[]>([]);
+
+  useEffect(() => {
+
+    const fetchMetadata = async () => {
+      //const fetchedMetadata: { name: string; symbol: string; uri: string }[] = [];
+      if (!metadata) {
+        // console.log("addresses", addresses, "address", address.address)
+        try {
+          const response = await fetch(`http://localhost:3300/api/token-metadata?mint=${address}`);
+          const data = await response.json();
+          //fetchedMetadata.push(data);
+          setManualMetadata(data)
+          console.log("manualMetadata", data)
+        } catch (error) {
+          console.error('Error fetching token metadata:', error);
+        }
+      };
+    }
+    fetchMetadata();
+
+  }, [metadata]);
+
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      const fetchedOtherMetadata: { name: string; symbol: string; description: string; image: string; showName: boolean; createdOn: string; twitter: string; telegram: string; website: string }[] = [];
+      //for (const metadata_ of metadata) {
+
+      if (!manualMetadata?.uri) {
+        console.log('Metadata URI is missing');
+        return;
+      }
+      console.log("manualMetadata===", manualMetadata?.uri)
+      try {
+        const response = await fetch(manualMetadata.uri);
+        const data = await response.json();
+        //setOtherMetadata(data)
+        setAllMetadata(data)
+      } catch (error) {
+        console.error('Error fetching token metadata:', error);
+      }
+      // }
+    };
+
+    fetchMetadata();
+  }, [manualMetadata]);
+  useEffect(() => {
+    const fetchData = async () => {
+      const response = await fetch('/api/bitquery', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ address }),
+      });
+      const result = await response.json();
+      setChartData(result.data.Solana.DEXTradeByTokens);
+    };
+
+    const fetchRaydiumData = async () => {
+      const response = await fetch('/api/raydium', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ address }),
+      });
+      const result = await response.json();
+      setChartData(result.data.Solana.DEXTradeByTokens);
+    };
+    fetchData();
+    fetchRaydiumData();
+    const interval = setInterval(() => {
+      fetchData();
+      fetchRaydiumData();
+    }, 600000); // Fetch every 60 seconds
+
+    return () => clearInterval(interval); // Clean up interval on component unmount
+  }, [address]);
+  type BusinessDay = { year: number; month: number; day: number };
+
+  useEffect(() => {
+    setTotalChartData((prevTotalChartData) => {
+      const mergedData = [...prevTotalChartData, ...chartData];
+
+      // Remove duplicates based on `time` and sort
+      const uniqueData = mergedData.reduce((acc, item) => {
+        if (!acc.some((d) => d.Block.Timefield === item.Block.Timefield)) acc.push(item);
+        return acc;
+      }, [] as RawTradeData[]);
+
+      //return uniqueData.sort((a, b) => a.time - b.time);
+      return uniqueData.sort((a, b) => {
+        const getTimeValue = (time: string | BusinessDay | number): number => {
+          if (typeof time === 'number') return time;
+          if (typeof time === 'string') return new Date(time).getTime();
+          if ('year' in time && 'month' in time && 'day' in time) {
+            // Convert BusinessDay to a Date object
+            return new Date(time.year, time.month - 1, time.day).getTime();
+          }
+          throw new Error('Invalid time format');
+        };
+
+        const timeA = getTimeValue(a.Block.Timefield);
+        const timeB = getTimeValue(b.Block.Timefield);
+
+        return timeA - timeB;
+      });
+
+    });
+  }, [chartData]);
+
+  const parseViewsCount = (views: string): number => {
+    if (views.endsWith('K')) {
+      return parseFloat(views) * 1000; // Convert "2K" to 2000
+    } else if (views.endsWith('M')) {
+      return parseFloat(views) * 1000000; // Convert "1M" to 1000000
+    }
+    return parseFloat(views); // For plain numbers
+  };
+  useEffect(() => {
+    const fetchData = async () => {
+
+
+      const response = await fetch(`http://localhost:3300/fetch-data?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
+      const jsonData = await response.json();
+
+      // Process data to calculate total views for each unique time
+      const viewCounts: { [key: string]: number } = {};
+      const engagementCounts: { [key: string]: number } = {};
+      const tweetCounts: { [key: string]: number } = {};
+      const emojiData: { [key: number]: string } = {};
+      const extractedUsernames: string[] = [];
+      const extractedTweets: string[] = [];
+      const extractedView: string[] = [];
+      const extractedLikes: string[] = [];
+      const extractedTimes: string[] = [];
+      const extractedProfile: string[] = [];
+      jsonData.forEach((entry: any) => {
+        const times = entry.params.time;
+        const views = entry.params.views;
+        const likes = entry.params.likes
+        const comments = entry.params.comment
+        const retweets = entry.params.retweet
+        const timestamp = entry.post_time
+        const eng_time = entry.params.plot_time
+        const statusUrl = entry.status;
+        const profileImag = entry.profile_image
+        const username = statusUrl.split('https://x.com/')[1].split('/status/')[0];
+        if (profileImag != undefined) {
+          extractedProfile.push(profileImag)
+        }
+        extractedUsernames.push("@" + username);
+        const tweets = entry.tweet;
+        extractedTweets.push(tweets)
+        extractedView.push(views)
+        extractedLikes.push(likes)
+        extractedTimes.push(timestamp)
+        const minuteKey = new Date(timestamp).toISOString().slice(0, 16); // Format: "YYYY-MM-DDTHH:MM"
+        // console.log("TIme Stampe", timestamp, "Minutets", minuteKey)
+        const emojiTimeStamp = new Date(timestamp).setSeconds(0, 0);
+        times.forEach((time: number, index: number) => {
+          const view = isNaN(parseViewsCount(views[index])) ? 0 : parseViewsCount(views[index]);
+          const plot_mint = new Date(eng_time[index]).toISOString().slice(0, 16);
+          const like = isNaN(parseViewsCount(likes[index])) ? 0 : parseViewsCount(likes[index]);
+          const comment = isNaN(parseViewsCount(comments[index])) ? 0 : parseViewsCount(comments[index]);
+          const retweet = isNaN(parseViewsCount(retweets[index])) ? 0 : parseViewsCount(retweets[index]);
+          const timeKey = `${time} min`;
+
+          if (viewCounts[plot_mint]) {
+            viewCounts[plot_mint] += view;
+          } else {
+            viewCounts[plot_mint] = view;
+          }
+          if (engagementCounts[plot_mint]) {
+            engagementCounts[plot_mint] += (like + comment + retweet);
+          } else {
+            engagementCounts[plot_mint] = (like + comment + retweet);
+          }
+          //console.log("Engagement", like, comment, retweet, "Total", (like + comment + retweet))
+        });
+        if (tweetCounts[minuteKey]) {
+          tweetCounts[minuteKey] += 1; // Increment the count for tweets in this minute
+        } else {
+          tweetCounts[minuteKey] = 1; // Initialize with 1 tweet for this minute
+        }
+        if (!emojiData[emojiTimeStamp]) {
+          const sentiment = parseViewsCount(views[views.length - 1])
+          if (sentiment > 10000) {
+            emojiData[emojiTimeStamp] = "💎"//profileImag ?? "https://via.placeholder.com/40"// Add emoji based on timestamp
+          } else if (sentiment > 5000) {
+            emojiData[emojiTimeStamp] = "♦️"
+          } else if (sentiment > 1000) {
+            emojiData[emojiTimeStamp] = "🥇"
+          } else if (sentiment > 500) {
+            emojiData[emojiTimeStamp] = "🥈"
+          } else {
+            emojiData[emojiTimeStamp] = "😎"
+          }
+        }
+      });
+
+      // Convert the viewCounts object into an array
+      const impressionsArray = Object.entries(viewCounts).map(([name, value]) => ({
+        name,
+        value
+      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
+      const engamentArray = Object.entries(engagementCounts).map(([name, value]) => ({
+        name,
+        value
+      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
+      // Convert the tweetCounts object into an array
+      const tweetsPerMinuteArray = Object.entries(tweetCounts).map(([name, value]) => ({
+        name,
+        value
+      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
+      const emojiArray = Object.entries(emojiData).map(([time, emoji]) => ({
+        em_time: parseInt(time, 10),
+        emoji,
+      })).sort((a, b) => a.em_time - b.em_time);
+      //console.log("emojiArray", emojiArray)
+      setEmojiRawData(emojiArray)
+      setImpressionsData(impressionsArray);
+      setTweetsPerMinuteData(tweetsPerMinuteArray);
+      setEngamentData(engamentArray)
+      setUsernames(extractedUsernames);
+      setTweets(extractedTweets)
+      setLikes(extractedLikes)
+      setViewCount(extractedView)
+      setTime(extractedTimes)
+      setProfile(extractedProfile)
+    };
+    fetchData();
+    const interval = setInterval(() => {
+      fetchData();
+    }, 60000); // Fetch every 60 seconds
+
+    return () => clearInterval(interval);
+  }, [address]);
+  const [isScriptReady, setIsScriptReady] = useState(false);
+  const [isScriptWidgetReady, setIsScriptWidgetReady] = useState(false);
+  const metadata_ = metadata || allMetadata
+  //console.log("Metadsss", metadata_)
+  return (
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col">
+      {/* Header */}
+
+      <header className="p-4 border-b border-gray-700">
+        <h1 className="text-lg font-bold">{metadata_?.name} ({metadata_?.symbol})</h1>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-grow p-4 flex flex-col lg:flex-row">
+        {/* Left Section */}
+        <section className="w-full lg:w-2/3 flex flex-col">
+          <div>
+            <h1>Blockchain Data on TradingView Charts</h1>
+            {/*totalchartData.length > 0 ? <TVChart data={totalchartData} /> : <p>Loading...</p>*/}
+            <Script
+              src="/static/datafeeds/udf/dist/bundle.js"
+              strategy="lazyOnload"
+              onReady={() => {
+                setIsScriptReady(true);
+              }}
+            />
+            <Script
+              src="/static/charting_library/charting_library.js"
+              strategy="lazyOnload"
+              onReady={() => {
+                console.log("Loadedd--xx--", window.TradingView.widget)
+                setIsScriptWidgetReady(true);
+              }}
+            />
+            {isScriptReady && isScriptWidgetReady && <TVChartContainer data={totalchartData} name={metadata_?.name} symbol={metadata_?.symbol} emojiData={emojiRawData} />}
+          </div>
+
+          {/* <Chart name={metadata?.name} symbol={metadata?.symbol} />*/}
+          {/* Use flex-grow to push TopTweets to the bottom */}
+          <div className="flex-grow"></div>
+          <TopTweets username={usernames} tweets_={tweets} likes={likes} viewscount={viewscount} timestamp={time} profile={profile} />
+        </section>
+
+        {/* Right Section (Sidebar) */}
+        <aside className="w-full lg:w-1/3 p-4 border-l border-gray-700">
+          <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} tweetPerMinut={tweetPerMinute} impression={impressionsData} engagement={engaments} />
+        </aside>
+      </main>
+    </div>
+  );
+}
