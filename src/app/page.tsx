@@ -25,7 +25,7 @@ export default function Home() {
   };
   useEffect(() => {
     // Fetch the JSON file
-    fetch("http://localhost:3300/addresses/address.json")
+    fetch("http://0.0.0.0:3300/addresses/address.json")
       .then((response) => {
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
@@ -43,7 +43,7 @@ export default function Home() {
       for (const address of addresses) {
         // console.log("addresses", addresses, "address", address.address)
         try {
-          const response = await fetch(`http://localhost:3300/api/token-metadata?mint=${address.address}`);
+          const response = await fetch(`http://0.0.0.0:3300/api/token-metadata?mint=${address.address}`);
           const data = await response.json();
           fetchedMetadata.push(data);
 
@@ -84,8 +84,10 @@ export default function Home() {
       const extractedNestedUsernames: string[][] = [];
       const extractedNestedTweets: string[][] = [];
       const impressionNestedArry: Impression[][] = []
+     
       for (const address of addresses) {
-        const response = await fetch(`http://localhost:3300/fetch-data?search=${address}`); // Load the JSON data
+        //console.log("Address cc",address.address)
+        const response = await fetch(`http://0.0.0.0:3300/fetch-data?search=${address.address}`); // Load the JSON data
         const jsonData = await response.json();
 
         // Process data to calculate total views for each unique time
@@ -102,7 +104,7 @@ export default function Home() {
           const tweets = entry.tweet;
           extractedTweets.push(tweets)
           times.forEach((time: number, index: number) => {
-            const view = parseViewsCount(views[index])//parseInt(views[index], 10);
+            const view = isNaN(parseViewsCount(views[index])) ? 0 : parseViewsCount(views[index]);
             const timeKey = `${time} min`;
 
             if (viewCounts[timeKey]) {
@@ -121,9 +123,11 @@ export default function Home() {
         }));
         impressionNestedArry.push(impressionsArray)
       }
+      console.log("Impression Data",impressionNestedArry)
       setImpressionsData(impressionNestedArry);
       setUsernames(extractedNestedUsernames);
       setTweets(extractedNestedTweets)
+
     };
 
     fetchData();

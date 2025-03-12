@@ -19,7 +19,7 @@ interface NewlyCreatedSectionProps {
 const NewlyCreatedSection: React.FC<NewlyCreatedSectionProps> = ({ addresses, othermetadata, usrname, tweets, impressionsData }) => {
     const router = useRouter();
     const { setMetadata } = useMetadata();
-
+    
     const handleRowClick = (address: string, metadata: any) => {
         setMetadata(metadata);
         router.push(`/coin/${address}`);

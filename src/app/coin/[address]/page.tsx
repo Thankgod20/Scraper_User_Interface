@@ -9,15 +9,19 @@ import { useMetadata } from '@/context/MetadataContext';
 import React, { useEffect, useState } from "react";
 import { CandlestickData } from 'lightweight-charts';
 import TVChart from '@/components/TVChart';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 //import { TVChartContainer } from '@/components/AdvChart';
 import TVChartContainer from '@/components/AdvChart';
 import Script from 'next/script';
 import { CandleData, RawTradeData } from '@/app/types/TradingView';
+import Sentiment from 'sentiment';
 //import AdvChart from '@/components/AdvChart';
 interface Impression {
   name: string;
   value: number;
 }
+const ALPHA = 0.01; // baseline pump magnitude (e.g., 1%)
+const BETA = 0.05;  // sensitivity coefficient
 export default function Home() {
   const { address }: { address: string } = useParams();
   const { metadata } = useMetadata();
@@ -27,7 +31,9 @@ export default function Home() {
   const [impressionsData, setImpressionsData] = useState<Impression[]>([]);
   const [engaments, setEngamentData] = useState<Impression[]>([]);
   const [tweetPerMinute, setTweetsPerMinuteData] = useState<Impression[]>([]);
+  const [tweetViewsPerMinute, setTweetsViewsPerMinuteData] = useState<Impression[]>([]);
   const [emojiRawData, setEmojiRawData] = useState<{ em_time: number, emoji: string }[]>([]);
+  const [holderRawData, setHoldersRawData] = useState<{ amount: number, time: number }[]>([]);
   const [usernames, setUsernames] = useState<string[]>([]);
   const [tweets, setTweets] = useState<string[]>([]);
   const [likes, setLikes] = useState<string[]>([]);
@@ -37,6 +43,60 @@ export default function Home() {
 
   const [chartData, setChartData] = useState<RawTradeData[]>([]);
   const [totalchartData, setTotalChartData] = useState<RawTradeData[]>([]);
+  const [sentimentTimeSeries, setSentimentTimeSeries] = useState<{ time: string; aggregatedSentiment: number }[]>([]);
+  // Overall aggregated sentiment and pump prediction across all tweets (optional)
+  const [aggregatedSentiment, setAggregatedSentiment] = useState<number | null>(null);
+  const [predictedPump, setPredictedPump] = useState<number | null>(null);
+  const sentimentAnalyzer = new Sentiment();
+  // Helper function to compute overall aggregated sentiment (if needed)
+  const computeOverallSentiment = (tweetData: any[]) => {
+    let weightedSentiment = 0;
+    let totalWeight = 0;
+    tweetData.forEach((entry) => {
+      const text = entry.tweet;
+      if (!text) return;
+      const result = sentimentAnalyzer.analyze(text);
+      let weight = 1;
+      if (entry.params?.views && entry.params.views.length > 0) {
+        weight = parseFloat(entry.params.views[0]) || 1;
+      }
+      weightedSentiment += result.score * weight;
+      totalWeight += weight;
+    });
+    const aggSent = totalWeight > 0 ? weightedSentiment / totalWeight : 0;
+    setAggregatedSentiment(aggSent);
+    setPredictedPump(ALPHA + BETA * aggSent);
+  };
+
+  // Helper function to compute sentiment per minute
+  const computeSentimentTimeSeries = (tweetData: any[]) => {
+    const sentimentByTime: { [time: string]: { totalSentiment: number, weight: number } } = {};
+    tweetData.forEach((entry) => {
+      const text = entry.tweet;
+      if (!text) return;
+      const result = sentimentAnalyzer.analyze(text);
+      let weight = 1;
+      if (entry.params?.views && entry.params.views.length > 0) {
+        weight = parseFloat(entry.params.views[0]) || 1;
+      }
+      // Group by minute using post_time
+      const timestamp = entry.post_time;
+      const timeKey = new Date(timestamp).toISOString().slice(0, 16); // "YYYY-MM-DDTHH:MM"
+      if (!sentimentByTime[timeKey]) {
+        sentimentByTime[timeKey] = { totalSentiment: 0, weight: 0 };
+      }
+      sentimentByTime[timeKey].totalSentiment += result.score * weight;
+      sentimentByTime[timeKey].weight += weight;
+    });
+    const timeSeries = Object.entries(sentimentByTime).map(([time, obj]) => ({
+      time,
+      aggregatedSentiment: obj.weight > 0 ? obj.totalSentiment / obj.weight : 0,
+    }));
+    // Sort time series by time
+    timeSeries.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    console.log("timeSeries",timeSeries)
+    setSentimentTimeSeries(timeSeries);
+  };
 
   useEffect(() => {
 
@@ -45,7 +105,7 @@ export default function Home() {
       if (!metadata) {
         // console.log("addresses", addresses, "address", address.address)
         try {
-          const response = await fetch(`http://localhost:3300/api/token-metadata?mint=${address}`);
+          const response = await fetch(`http://0.0.0.0:3300/api/token-metadata?mint=${address}`);
           const data = await response.json();
           //fetchedMetadata.push(data);
           setManualMetadata(data)
@@ -83,7 +143,7 @@ export default function Home() {
     fetchMetadata();
   }, [manualMetadata]);
   useEffect(() => {
-    const fetchData = async () => {
+  /*  const fetchData = async () => {
       const response = await fetch('/api/bitquery', {
         method: 'POST',
         headers: {
@@ -93,7 +153,7 @@ export default function Home() {
       });
       const result = await response.json();
       setChartData(result.data.Solana.DEXTradeByTokens);
-    };
+    };*/
 
     const fetchRaydiumData = async () => {
       const response = await fetch('/api/raydium', {
@@ -106,10 +166,10 @@ export default function Home() {
       const result = await response.json();
       setChartData(result.data.Solana.DEXTradeByTokens);
     };
-    fetchData();
+   // fetchData();
     fetchRaydiumData();
     const interval = setInterval(() => {
-      fetchData();
+     // fetchData();
       fetchRaydiumData();
     }, 600000); // Fetch every 60 seconds
 
@@ -160,13 +220,14 @@ export default function Home() {
     const fetchData = async () => {
 
 
-      const response = await fetch(`http://localhost:3300/fetch-data?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
+      const response = await fetch(`http://0.0.0.0:3300/fetch-data?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
       const jsonData = await response.json();
 
       // Process data to calculate total views for each unique time
       const viewCounts: { [key: string]: number } = {};
       const engagementCounts: { [key: string]: number } = {};
       const tweetCounts: { [key: string]: number } = {};
+      const tweetViews: { [key: string]: number } = {};
       const emojiData: { [key: number]: string } = {};
       const extractedUsernames: string[] = [];
       const extractedTweets: string[] = [];
@@ -222,6 +283,14 @@ export default function Home() {
         } else {
           tweetCounts[minuteKey] = 1; // Initialize with 1 tweet for this minute
         }
+        //console.log("views[time.length-1]",views[views.length-1])
+        const view = isNaN(parseViewsCount(views[views.length-1])) ? 0 : parseViewsCount(views[views.length-1]);
+        if (tweetViews[minuteKey]) {
+          
+          tweetViews[minuteKey] += view; // Increment the count for tweets in this minute
+        } else {
+          tweetViews[minuteKey] = view; // Initialize with 1 tweet for this minute
+        }
         if (!emojiData[emojiTimeStamp]) {
           const sentiment = parseViewsCount(views[views.length - 1])
           if (sentiment > 10000) {
@@ -256,10 +325,15 @@ export default function Home() {
         em_time: parseInt(time, 10),
         emoji,
       })).sort((a, b) => a.em_time - b.em_time);
+      const tweetsPerViewsMinuteArray = Object.entries(tweetViews).map(([name, value]) => ({
+        name,
+        value
+      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
       //console.log("emojiArray", emojiArray)
       setEmojiRawData(emojiArray)
       setImpressionsData(impressionsArray);
       setTweetsPerMinuteData(tweetsPerMinuteArray);
+      setTweetsViewsPerMinuteData(tweetsPerViewsMinuteArray);
       setEngamentData(engamentArray)
       setUsernames(extractedUsernames);
       setTweets(extractedTweets)
@@ -267,11 +341,39 @@ export default function Home() {
       setViewCount(extractedView)
       setTime(extractedTimes)
       setProfile(extractedProfile)
+
+      computeOverallSentiment(jsonData);
+      // Compute sentiment time series (grouped by minute)
+      computeSentimentTimeSeries(jsonData);
     };
     fetchData();
+    const fetchHolersData = async () => {
+
+
+      const response = await fetch(`http://0.0.0.0:3300/fetch-holders?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
+      const jsonData = await response.json();
+      const holderData: { [key: number]: number } = {};
+      jsonData.forEach((entry: any) => {
+        const timestamp = entry.time;
+        const amount = parseFloat(entry.amount);
+        const holderTimeStamp = new Date(timestamp).setSeconds(0, 0);
+        if (holderData[holderTimeStamp]) {
+          holderData[holderTimeStamp]+=amount
+        } else {
+          holderData[holderTimeStamp]=amount
+        }
+      })
+      const holdersArray = Object.entries(holderData).map(([time, amount]) => ({
+        time: parseInt(time, 10),
+        amount
+      })).sort((a, b) => a.time - b.time);
+      setHoldersRawData(holdersArray)
+     // console.log("Holders Data",holderData)
+    }
+      fetchHolersData()
     const interval = setInterval(() => {
-      fetchData();
-    }, 60000); // Fetch every 60 seconds
+      fetchData();fetchHolersData()
+    }, 300000); // Fetch every 60 seconds
 
     return () => clearInterval(interval);
   }, [address]);
@@ -285,6 +387,12 @@ export default function Home() {
 
       <header className="p-4 border-b border-gray-700">
         <h1 className="text-lg font-bold">{metadata_?.name} ({metadata_?.symbol})</h1>
+        {aggregatedSentiment !== null && predictedPump !== null && (
+          <div className="mt-2">
+            <p>Overall Aggregated Sentiment: {aggregatedSentiment.toFixed(2)}</p>
+            <p>Predicted Overall Pump Magnitude: {(predictedPump * 100).toFixed(2)}%</p>
+          </div>
+        )}
       </header>
 
       {/* Main Content */}
@@ -309,18 +417,19 @@ export default function Home() {
                 setIsScriptWidgetReady(true);
               }}
             />
-            {isScriptReady && isScriptWidgetReady && <TVChartContainer data={totalchartData} name={metadata_?.name} symbol={metadata_?.symbol} emojiData={emojiRawData} />}
+            {isScriptReady && isScriptWidgetReady && <TVChartContainer data={totalchartData} name={metadata_?.name} symbol={metadata_?.symbol} emojiData={emojiRawData} holders={holderRawData} />}
           </div>
 
           {/* <Chart name={metadata?.name} symbol={metadata?.symbol} />*/}
           {/* Use flex-grow to push TopTweets to the bottom */}
+         
           <div className="flex-grow"></div>
           <TopTweets username={usernames} tweets_={tweets} likes={likes} viewscount={viewscount} timestamp={time} profile={profile} />
         </section>
 
         {/* Right Section (Sidebar) */}
         <aside className="w-full lg:w-1/3 p-4 border-l border-gray-700">
-          <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} tweetPerMinut={tweetPerMinute} impression={impressionsData} engagement={engaments} />
+          <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} tweetPerMinut={tweetPerMinute} impression={impressionsData} engagement={engaments} tweetViews={tweetViewsPerMinute} sentimentPlot={sentimentTimeSeries}/>
         </aside>
       </main>
     </div>
