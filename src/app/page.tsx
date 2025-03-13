@@ -25,7 +25,7 @@ export default function Home() {
   };
   useEffect(() => {
     // Fetch the JSON file
-    fetch("http://0.0.0.0:3300/addresses/address.json")
+    fetch(`http://${window.location.hostname}:3300/addresses/address.json`)
       .then((response) => {
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
@@ -43,7 +43,7 @@ export default function Home() {
       for (const address of addresses) {
         // console.log("addresses", addresses, "address", address.address)
         try {
-          const response = await fetch(`http://0.0.0.0:3300/api/token-metadata?mint=${address.address}`);
+          const response = await fetch(`http://${window.location.hostname}:3300/api/token-metadata?mint=${address.address}`);
           const data = await response.json();
           fetchedMetadata.push(data);
 
@@ -87,7 +87,7 @@ export default function Home() {
      
       for (const address of addresses) {
         //console.log("Address cc",address.address)
-        const response = await fetch(`http://0.0.0.0:3300/fetch-data?search=${address.address}`); // Load the JSON data
+        const response = await fetch(`http://${window.location.hostname}:3300/fetch-data?search=${address.address}`); // Load the JSON data
         const jsonData = await response.json();
 
         // Process data to calculate total views for each unique time

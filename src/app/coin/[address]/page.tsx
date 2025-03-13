@@ -105,7 +105,7 @@ export default function Home() {
       if (!metadata) {
         // console.log("addresses", addresses, "address", address.address)
         try {
-          const response = await fetch(`http://0.0.0.0:3300/api/token-metadata?mint=${address}`);
+          const response = await fetch(`http://${window.location.hostname}:3300/api/token-metadata?mint=${address}`);
           const data = await response.json();
           //fetchedMetadata.push(data);
           setManualMetadata(data)
@@ -220,7 +220,7 @@ export default function Home() {
     const fetchData = async () => {
 
 
-      const response = await fetch(`http://0.0.0.0:3300/fetch-data?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
+      const response = await fetch(`http://${window.location.hostname}:3300/fetch-data?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
       const jsonData = await response.json();
 
       // Process data to calculate total views for each unique time
@@ -350,7 +350,7 @@ export default function Home() {
     const fetchHolersData = async () => {
 
 
-      const response = await fetch(`http://0.0.0.0:3300/fetch-holders?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
+      const response = await fetch(`http://${window.location.hostname}:3300/fetch-holders?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
       const jsonData = await response.json();
       const holderData: { [key: number]: number } = {};
       jsonData.forEach((entry: any) => {
