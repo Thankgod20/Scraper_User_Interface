@@ -6,6 +6,7 @@ import { ChartingLibraryWidgetOptions } from '../../public/static/charting_libra
 interface TVChartContainerProps {
   data: RawTradeData[];
   name: any;
+  address: string;
   symbol: any;
   emojiData: { em_time: number; emoji: string }[];
   holders: { amount: number; time: number }[];
@@ -25,14 +26,15 @@ function isTimestampIn15MinuteRange(
 const TVChartContainer: React.FC<TVChartContainerProps> = ({
   data,
   name,
+  address,
   symbol,
   emojiData,
   holders
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const data_x = data;
-  const customDataFeed = new CustomDataFeed(data, symbol);
-console.log("holders",holders)
+  const customDataFeed = new CustomDataFeed(data, symbol,address);
+console.log("holders",customDataFeed)
   useEffect(() => {
     const widgetOptions = {
       symbol: symbol ?? 'AAPL',
@@ -71,14 +73,15 @@ console.log("holders",holders)
 
       // Convert your raw data to a more convenient array
       const datass = data_x.map((entry) => ({
-        time: new Date(entry.Block.Timefield).getTime(), // ms
-        open: entry.Trade.open,
-        high: entry.Trade.high,
-        low: entry.Trade.low,
-        close: entry.Trade.close,
-        volume: parseFloat(entry.volume),
+        time: new Date(entry.time).getTime(), // ms
+        open: entry.open,
+        high: entry.high,
+        low: entry.low,
+        close: entry.close,
+        volume: entry.volume,//parseFloat(entry.volume),
       }));
 
+      console.log("Load Data",datass)
       // Get the last candle's time (in ms) so we can stretch rectangles to the latest candle
       const lastCandleTime = datass.length
         ? datass[datass.length - 1].time

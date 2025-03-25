@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       : rawPoolId;
 
     // Step 2: Fetch OHLCV data for the pool using the poolId
-    const ohlcvUrl = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolId}/ohlcv/minute?aggregate=1&limit=1000¤cy=USD`;
+    const ohlcvUrl = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolId}/ohlcv/minute?aggregate=1&limit=2¤cy=USD`;
     const ohlcvResponse = await axios.get(ohlcvUrl);
 
     // Return the OHLCV data as JSON
@@ -46,3 +46,5 @@ export async function POST(request: Request) {
     );
   }
 }
+
+

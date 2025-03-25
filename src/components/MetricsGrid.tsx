@@ -98,15 +98,104 @@ function calculateImpressionGrowth(impressionData: Impression[]): number {
   
   // If no valid pairs were found, return 0.
   return validPairs === 0 ? 0 : totalPercentChange / validPairs;
+}/*
+function calculateTweetViewsRatioPercentage(
+  tweetPerFVmints: Impression[],
+  movingAverageTweetViews: Impression[]
+): Impression[] {
+  const minLength = Math.min(tweetPerFVmints.length, movingAverageTweetViews.length);
+  const ratioData: Impression[] = [];
+
+  for (let i = 0; i < minLength; i++) {
+    const avgViews = movingAverageTweetViews[i].value;
+    const tweets = tweetPerFVmints[i].value;
+    // Calculate the ratio; if avgViews is 0, set ratio to 0 to avoid division by zero.
+    let ratio = avgViews !== 0 ? tweets / avgViews : 0;
+    // Convert to percentage and cap at 100%
+    ratio = Math.min(100, ratio * 100);
+
+    ratioData.push({
+      name: tweetPerFVmints[i].name,
+      value: ratio,
+    });
+  }
+
+  return ratioData;
+}
+*/
+
+function calculateCumulativeAverage(data: Impression[]): Impression[] {
+  let cumulativeSum = 0;
+  return data.map((point, index) => {
+    cumulativeSum += point.value;
+    const average = cumulativeSum / (index + 1);
+    return { name: point.name, value: average };
+  });
+}
+
+/**
+ * Calculates the cumulative sum of tweet counts.
+ * For each data point, it computes the sum of all tweet counts up to that point.
+ */
+function calculateCumulativeSum(data: Impression[]): Impression[] {
+  let cumulativeSum = 0;
+  return data.map((point) => {
+    cumulativeSum += point.value;
+    return { name: point.name, value: cumulativeSum };
+  });
+}
+
+
+/**
+ * Calculates the ratio (as a percentage, capped at 100) of cumulative tweet counts
+ * to the cumulative average of tweet views.
+ */
+function calculateCumulativeRatioPercentage(
+  tweetCounts: Impression[],
+  tweetViews: Impression[]
+): Impression[] {
+  const cumulativeAvgViews = calculateCumulativeAverage(tweetViews);
+  const cumulativeTweetCounts = calculateCumulativeSum(tweetCounts);
+  const minLength = Math.min(cumulativeAvgViews.length, cumulativeTweetCounts.length);
+  const ratioData: Impression[] = [];
+
+  for (let i = 0; i < minLength; i++) {
+    const avgViews = cumulativeAvgViews[i].value;
+    const totalTweets = cumulativeTweetCounts[i].value;
+    // Compute ratio (ensure no division by zero) and convert to percentage.
+    let ratio = avgViews !== 0 ? (totalTweets / avgViews) * 100 : 0;
+    ratio = Math.min(100, ratio); // Cap at 100%
+    ratioData.push({ name: cumulativeAvgViews[i].name, value: ratio });
+  }
+  return ratioData;
+}
+
+function calculateMovingAverage(data: Impression[], windowSize: number): Impression[] {
+  if (data.length === 0) return [];
+  
+  return data.map((point, index, arr) => {
+    // Determine the start index of the window
+    const startIndex = Math.max(0, index - windowSize + 1);
+    // Get the slice of data within the current window
+    const windowSlice = arr.slice(startIndex, index + 1);
+    // Calculate the sum of values in the window
+    const sum = windowSlice.reduce((acc, item) => acc + item.value, 0);
+    // Compute the average for the current window
+    const average = sum / windowSlice.length;
+    // Return a new Impression with the same timestamp and computed average
+    return { name: point.name, value: average };
+  });
 }
 
 /**
  * Calculate the average current views per tweet overall.
  */
 function calculateAverageViewsPerTweet(impressionData: Impression[], tweetData: Impression[]): number {
+  
   const totalImpressions = impressionData.reduce((sum, imp) => sum + imp.value, 0);
   const totalTweets = tweetData.reduce((sum, tweet) => sum + tweet.value, 0);
-  return totalTweets > 0 ? totalImpressions / totalTweets : 0;
+  //console.log("Views Per Tweet",totalImpressions)
+  return totalTweets > 0 ? totalImpressions / impressionData.length : 0;
 }
 
 /**
@@ -371,7 +460,6 @@ function categorizeTweetsByInterval(data: Impression[], minute: number): Impress
 }
 
 const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetPerMinut, impression, engagement,tweetViews,sentimentPlot }) => {
-  console.log("sentimentPlot",sentimentPlot)
   let twt = `https://x.com/search?q=${address}`;
   if (twitter != null) {
     twt = twitter;
@@ -381,9 +469,18 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   const totalTweets_ = tweetPerMinut.reduce((sum, tweet) => sum + tweet.value, 0);
   const totalTweets = NumberFormatter.formatNumber(totalTweets_);
   const tweetViewsPerFVmints = categorizeTweetsByInterval(tweetViews, 5);
+  const movingAverageTweetViews = calculateMovingAverage(tweetViewsPerFVmints, 9);
+
 //console.log("Impression Data",tweetViewsPerFVmints)
   // Group tweets by 5 minutes.
   const tweetPerFVmints = categorizeTweetsByInterval(tweetPerMinut, 5);
+  const tweetPerTnmints = categorizeTweetsByInterval(tweetPerMinut, 10);
+
+  const tweetViewsRatioPercentage =calculateCumulativeRatioPercentage (
+    tweetPerFVmints,
+    tweetViews
+  );
+  //calculateTweetViewsRatioPercentage(tweetPerTnmints,movingAverageTweetViews)
   // Calculate tweet growth based on the 5-minute grouping.
   const tweetGrowthPercentage = calculateTweetGrowthFromGroupedData(tweetPerFVmints, 5);
   // Calculate impression growth percentage.
@@ -525,6 +622,15 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
           isPositiveChange={avgViewsPerTweet >= 0}
           graph={<LineGraph data={tweetViewsPerFVmints} color="#3B82F6" />}
           onClick={() => openPopup("Average Views/Tweet", tweetViewsPerFVmints)}
+        />
+          <MetricCard
+          title="AvgTweetMade/AvgViews"
+          value={NumberFormatter.formatNumber(Number(((Number(totalTweets)/avgViewsPerTweet)*100).toFixed(2)))}
+          percentageChange=""
+          subText="Overall Interest of callers"
+          isPositiveChange={avgViewsPerTweet >= 0}
+          graph={<LineGraph data={tweetViewsRatioPercentage} color="#3B82F6" />}
+          onClick={() => openPopup("Average Views/Tweet", tweetViewsRatioPercentage)}
         />
       </div>
       <div style={{ textAlign: "center", padding: "20px" }}>

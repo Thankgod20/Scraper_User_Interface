@@ -48,6 +48,57 @@ export default function Home() {
   const [aggregatedSentiment, setAggregatedSentiment] = useState<number | null>(null);
   const [predictedPump, setPredictedPump] = useState<number | null>(null);
   const sentimentAnalyzer = new Sentiment();
+  const options = {
+    extras: {
+      // Single words & tokens for phrases
+      'bundles': -5,
+      'control': -5,
+      'manipulate': -3,
+      'market': -2,
+      'doesn\'t_look': -2,
+      'SCAM': -5,
+      'scam': -5,
+      'dump': -3,
+      'rug': -5,
+      'dex': 2,
+      'KOL': 2,
+      'bullish': 2,
+      'paid': 3,
+      '1x': 2,
+      '2x': 2,
+      '3x': 2,
+      '4x': 2,
+      '5x': 2,
+      '10x': 2,
+      '100x': 2,
+      '1000x': 2,
+      'moon': 2,
+      // Additional phrases can be added here
+      'not_safe': -3,
+      'poor_quality': -4,
+      'high_risk': -5,
+      'low_confidence': -3,
+    }
+  };
+  
+  // Preprocessing function to replace known multi-word phrases with a single token
+  const preprocessText = (text:string) => {
+    const phrases = [
+      { phrase: "doesn't look", token: "doesn\'t_look" },
+      { phrase: "not safe", token: "not_safe" },
+      { phrase: "poor quality", token: "poor_quality" },
+      { phrase: "high risk", token: "high_risk" },
+      { phrase: "low confidence", token: "low_confidence" },
+      // add additional phrases as needed
+    ];
+    let processedText = text;
+    phrases.forEach(({ phrase, token }) => {
+      const regex = new RegExp(phrase, "gi");
+      processedText = processedText.replace(regex, token);
+    });
+    return processedText;
+  };
+  
   // Helper function to compute overall aggregated sentiment (if needed)
   const computeOverallSentiment = (tweetData: any[]) => {
     let weightedSentiment = 0;
@@ -55,8 +106,24 @@ export default function Home() {
     tweetData.forEach((entry) => {
       const text = entry.tweet;
       if (!text) return;
-      const result = sentimentAnalyzer.analyze(text);
-      let weight = 1;
+      
+      // Preprocess text to handle multi-word phrases
+      const processedText = preprocessText(text);
+      const result = sentimentAnalyzer.analyze(processedText, options);
+  
+      // Custom rule: if "Rug probability:" exists and is > 40%, force negative score.
+      const rugMatch = processedText.match(/Rug probability:\s*(\d+)%/i);
+      if (rugMatch) {
+        const prob = parseFloat(rugMatch[1]);
+        if (prob > 40) {
+          // For example, force the score to -5 (or adjust as needed)
+          result.score = -5;
+        }
+      }
+      
+      //console.log("Tweet:", text, "\nProcessed:", processedText, "\nResult:", result);
+      
+      let weight = 0.3;
       if (entry.params?.views && entry.params.views.length > 0) {
         weight = parseFloat(entry.params.views[0]) || 1;
       }
@@ -67,14 +134,26 @@ export default function Home() {
     setAggregatedSentiment(aggSent);
     setPredictedPump(ALPHA + BETA * aggSent);
   };
-
+  
   // Helper function to compute sentiment per minute
   const computeSentimentTimeSeries = (tweetData: any[]) => {
     const sentimentByTime: { [time: string]: { totalSentiment: number, weight: number } } = {};
     tweetData.forEach((entry) => {
       const text = entry.tweet;
       if (!text) return;
-      const result = sentimentAnalyzer.analyze(text);
+      
+      const processedText = preprocessText(text);
+      const result = sentimentAnalyzer.analyze(processedText, options);
+  
+      // Custom rule for "Rug probability:"
+      const rugMatch = processedText.match(/Rug probability:\s*(\d+)%/i);
+      if (rugMatch) {
+        const prob = parseFloat(rugMatch[1]);
+        if (prob > 40) {
+          result.score = -5;
+        }
+      }
+      
       let weight = 1;
       if (entry.params?.views && entry.params.views.length > 0) {
         weight = parseFloat(entry.params.views[0]) || 1;
@@ -94,9 +173,10 @@ export default function Home() {
     }));
     // Sort time series by time
     timeSeries.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-    console.log("timeSeries",timeSeries)
+    console.log("timeSeries", timeSeries);
     setSentimentTimeSeries(timeSeries);
   };
+  
 
   useEffect(() => {
 
@@ -164,26 +244,37 @@ export default function Home() {
         body: JSON.stringify({ address }),
       });
       const result = await response.json();
-      setChartData(result.data.Solana.DEXTradeByTokens);
+      //console.log("Result chart",result.data.attributes.ohlcv_list)
+      const mappedData: RawTradeData[] = result.data.attributes.ohlcv_list.map((entry: number[]) => ({
+        time: entry[0],
+        open: entry[1],
+        high: entry[2],
+        low: entry[3],
+        close: entry[4],
+        volume: entry[5],
+      }));
+      //console.log("Result chart",mappedData)
+      setChartData(mappedData);
+      
     };
    // fetchData();
     fetchRaydiumData();
-    const interval = setInterval(() => {
+    /*const interval = setInterval(() => {
      // fetchData();
       fetchRaydiumData();
     }, 600000); // Fetch every 60 seconds
 
-    return () => clearInterval(interval); // Clean up interval on component unmount
+    return () => clearInterval(interval);*/ // Clean up interval on component unmount
   }, [address]);
   type BusinessDay = { year: number; month: number; day: number };
 
   useEffect(() => {
     setTotalChartData((prevTotalChartData) => {
       const mergedData = [...prevTotalChartData, ...chartData];
-
+      
       // Remove duplicates based on `time` and sort
       const uniqueData = mergedData.reduce((acc, item) => {
-        if (!acc.some((d) => d.Block.Timefield === item.Block.Timefield)) acc.push(item);
+        if (!acc.some((d) => d.time === item.time)) acc.push(item);
         return acc;
       }, [] as RawTradeData[]);
 
@@ -199,15 +290,14 @@ export default function Home() {
           throw new Error('Invalid time format');
         };
 
-        const timeA = getTimeValue(a.Block.Timefield);
-        const timeB = getTimeValue(b.Block.Timefield);
+        const timeA = getTimeValue(a.time);
+        const timeB = getTimeValue(b.time);
 
         return timeA - timeB;
       });
 
     });
   }, [chartData]);
-
   const parseViewsCount = (views: string): number => {
     if (views.endsWith('K')) {
       return parseFloat(views) * 1000; // Convert "2K" to 2000
@@ -373,10 +463,11 @@ export default function Home() {
       fetchHolersData()
     const interval = setInterval(() => {
       fetchData();fetchHolersData()
-    }, 300000); // Fetch every 60 seconds
+    }, 600000); // Fetch every 60 seconds
 
     return () => clearInterval(interval);
   }, [address]);
+
   const [isScriptReady, setIsScriptReady] = useState(false);
   const [isScriptWidgetReady, setIsScriptWidgetReady] = useState(false);
   const metadata_ = metadata || allMetadata
@@ -417,7 +508,7 @@ export default function Home() {
                 setIsScriptWidgetReady(true);
               }}
             />
-            {isScriptReady && isScriptWidgetReady && <TVChartContainer data={totalchartData} name={metadata_?.name} symbol={metadata_?.symbol} emojiData={emojiRawData} holders={holderRawData} />}
+            {isScriptReady && isScriptWidgetReady && <TVChartContainer data={totalchartData} name={metadata_?.name} address={address} symbol={metadata_?.symbol} emojiData={emojiRawData} holders={holderRawData} />}
           </div>
 
           {/* <Chart name={metadata?.name} symbol={metadata?.symbol} />*/}

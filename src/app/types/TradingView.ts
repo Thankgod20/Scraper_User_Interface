@@ -7,12 +7,20 @@ export interface CandleData {
   volume: number;
 }
 
-export interface RawTradeData {
+/*export interface RawTradeData {
   Block: { Timefield: string };
   Trade: { open: number; high: number; low: number; close: number };
   volume: string;
 }
-
+*/
+export interface RawTradeData {
+  time: number;    // Timestamp (e.g., Unix time)
+  open: number;    // Opening price
+  high: number;    // Highest price
+  low: number;     // Lowest price
+  close: number;   // Closing price
+  volume: number;  // Trading volume
+}
 export interface IDataFeed {
   onReady: (callback: (config: any) => void) => void;
   resolveSymbol: (
