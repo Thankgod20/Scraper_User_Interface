@@ -351,7 +351,20 @@ export default function Home() {
         extractedView.push(views)
         extractedLikes.push(likes)
         extractedTimes.push(timestamp)
-        const minuteKey = new Date(timestamp).toISOString().slice(0, 16); // Format: "YYYY-MM-DDTHH:MM"
+        //console.log("Time Stamp",timestamp)
+        let minuteKey;
+        if (timestamp) {
+            try {
+                minuteKey = new Date(timestamp).toISOString().slice(0, 16);
+            } catch (error) {
+                console.warn("Invalid timestamp:", timestamp, error);
+                minuteKey = new Date().toISOString().slice(0, 16);
+            }
+        } else {
+            console.warn("Timestamp is empty or null, using current time.");
+            minuteKey = new Date().toISOString().slice(0, 16);
+        }
+        //console.log("Time Stamp minuteKey",minuteKey) // Format: "YYYY-MM-DDTHH:MM"
         // console.log("TIme Stampe", timestamp, "Minutets", minuteKey)
         const emojiTimeStamp = new Date(timestamp).setSeconds(0, 0);
         times.forEach((time: number, index: number) => {

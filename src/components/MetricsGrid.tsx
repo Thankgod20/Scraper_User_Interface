@@ -261,58 +261,64 @@ function calculateSentimentTrend(
  */
 /**
  * Calculate a tweet frequency trend as a percentage over time.
- * For each tweet record, count the number of tweets in the previous `windowMinutes`,
- * then normalize that count by the maximum expected tweets (tweetsPerMinuteThreshold * windowMinutes).
- * Finally, apply a moving average (smoothWindow) to smooth the trend.
+ * For each tweet record, count the number of tweets in the previous `windowMinutes`.
+ * Then apply a moving average (smoothWindow) and normalize the result against a total tweets threshold.
+ *
+ * @param data - Array of tweet counts with timestamps.
+ * @param windowMinutes - The time window (in minutes) over which to sum tweets.
+ * @param smoothWindow - Number of points to use for smoothing the trend.
+ * @param totalTweetsThreshold - The tweet count threshold considered as maximum hype (100%).
+ * @returns An array of objects with the timestamp and normalized tweet frequency percentage.
  */
 function calculateTweetFrequencyTrendPercentage(
   data: Impression[],
   windowMinutes: number = 5,
   smoothWindow: number = 3,
-  tweetsPerMinuteThreshold: number = 5
+  totalTweetsThreshold: number = 100
 ): Impression[] {
   if (data.length === 0) return [];
+
   // Sort data by timestamp ascending.
   const sortedData = [...data].sort(
     (a, b) => new Date(a.name).getTime() - new Date(b.name).getTime()
   );
-  
+
   // Compute raw frequency values using a sliding window.
   const rawTrend: Impression[] = sortedData.map(point => {
     const currentTime = new Date(point.name).getTime();
     const windowStart = currentTime - windowMinutes * 60000;
-    // Count tweets within the window.
+    // Sum tweets within the window.
     const frequency = sortedData
       .filter(p => {
-         const time = new Date(p.name).getTime();
-         return time >= windowStart && time <= currentTime;
+        const time = new Date(p.name).getTime();
+        return time >= windowStart && time <= currentTime;
       })
       .reduce((sum, p) => sum + p.value, 0);
     return { name: point.name, value: frequency };
   });
-  
-  // Apply a moving average to smooth the raw frequency data.
+
+  // Apply a simple moving average to smooth the raw frequency data.
   function movingAverage(values: Impression[], windowSize: number): Impression[] {
     return values.map((point, i, arr) => {
       const start = Math.max(0, i - windowSize + 1);
-      const window = arr.slice(start, i + 1);
-      const avg = window.reduce((sum, p) => sum + p.value, 0) / window.length;
+      const windowSlice = arr.slice(start, i + 1);
+      const avg = windowSlice.reduce((sum, p) => sum + p.value, 0) / windowSlice.length;
       return { name: point.name, value: avg };
     });
   }
-  
+
   const smoothedTrend = movingAverage(rawTrend, smoothWindow);
-  
+
   // Normalize each smoothed frequency value to a percentage.
-  // Maximum expected tweets in the window is tweetsPerMinuteThreshold * windowMinutes.
-  const maxTweetsPossible = tweetsPerMinuteThreshold * windowMinutes;
+  // The maximum expected tweets in the window is defined by totalTweetsThreshold.
   const normalizedTrend = smoothedTrend.map(point => ({
-      name: point.name,
-      value: Math.min(100, (point.value / maxTweetsPossible) * 100)
+    name: point.name,
+    value: Math.min((point.value / totalTweetsThreshold) * 100, 100)
   }));
-  
+
   return normalizedTrend;
 }
+
 
 
 function calculateSentimentVolatility(impressions: Impression[]): number {
