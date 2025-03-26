@@ -363,22 +363,31 @@ function detectSentimentPeaks(impressions: Impression[]): Impression[] {
 }
 
 function calculateSentimentScore(
-  tweetGrowth: number,
-  callerMin: number,
-  impressionRate: number
+  tweetFrequencyTrend: number, // expected as percentage (0-100)
+  sentimentTrend: number,      // expected as percentage (0-100)
+  views: number                // raw view count
 ): number {
-  const normalizedTweetGrowth = tweetGrowth;
-  const normalizedCallerMin = Math.min(callerMin, 100);
-  const normalizedImpressionRate = impressionRate;
-  const weightTweetGrowth = 0.2;
-  const weightCallerMin = 0.2;
-  const weightImpressionRate = 0.6;
+  // Normalize tweet frequency and sentiment trend to a maximum of 100.
+  const normalizedTweetFrequency = Math.min(tweetFrequencyTrend, 100);
+  const normalizedSentimentTrend = Math.min(sentimentTrend, 100);
+  
+  // Normalize views: if views >= 1000, treat as 100; otherwise, scale linearly.
+  const normalizedViews = views >= 1000 ? 100 : (views / 1000) * 100;
+  
+  // Define weights for each metric (adjust these as needed)
+  const weightTweetFrequency = 0.4;
+  const weightSentimentTrend = 0.3;
+  const weightViews = 0.3;
+  
   const sentimentScore =
-    normalizedTweetGrowth * weightTweetGrowth +
-    normalizedCallerMin * weightCallerMin +
-    normalizedImpressionRate * weightImpressionRate;
+    normalizedTweetFrequency * weightTweetFrequency +
+    normalizedSentimentTrend * weightSentimentTrend +
+    normalizedViews * weightViews;
+    
+  // Ensure the final score does not exceed 100.
   return Math.min(sentimentScore, 100);
 }
+
   
 function calculateAveragePercentage(impressions: Impression[]): number {
   if (impressions.length < 2) return 0;
@@ -511,6 +520,8 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   const sentimentPeaks = detectSentimentPeaks(impression);
   const tweetFrequencyTrend = calculateTweetFrequencyTrendPercentage(tweetPerMinut, 5, 14);
   const sentimentTrend = calculateSentimentTrend(sentimentPlot, 30);
+  const currentSentimentTrend = sentimentTrend[sentimentTrend.length - 1]?.aggregatedSentiment || 0;
+  const rawViews = avgViewsPerTweet; 
   const openPopup = (title: string, data: Impression[]) => {
     setSelectedMetric({ title, data });
   };
@@ -641,7 +652,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
       </div>
       <div style={{ textAlign: "center", padding: "20px" }}>
         <h1>Sentiment Meter</h1>
-        <SentimentMeter value={Math.round(calculateSentimentScore(tweetGrowthPercentage, totalTweets_, cumuAvrage))} />
+        <SentimentMeter value={Math.round(calculateSentimentScore(tweetGrowthPercentage, currentSentimentTrend, rawViews))} />
       </div>
       <Modal
         isOpen={!!selectedMetric || !!selectedTimeMetric}
