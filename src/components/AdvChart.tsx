@@ -81,7 +81,7 @@ console.log("holders",customDataFeed)
         volume: entry.volume,//parseFloat(entry.volume),
       }));
 
-      console.log("Load Data",datass)
+      console.log("Load Data D",datass)
       // Get the last candle's time (in ms) so we can stretch rectangles to the latest candle
       const lastCandleTime = datass.length
         ? datass[datass.length - 1].time

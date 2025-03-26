@@ -238,39 +238,58 @@ export class CustomDataFeed implements IDataFeed {
     };
   
     waitForLastBar(() => {
-      // Initialize lastBar and base values
-      let lastBar = data_[data_.length - 1];
-      let basePrice = lastBar.close;
-      let baseVolume = lastBar.volume;
-      let t = 0; // time counter for oscillation
+      // Get the last completed bar from history
+      let completedBar = data_[data_.length - 1];
   
-      // Define oscillation amplitudes
-      const priceAmplitude = Math.abs(lastBar.close - lastBar.open);
-      const volumeAmplitude = lastBar.volume * 0.1;
+      // Create a new simulated candle for the next interval
+      let simulatedBar: CandleData = {
+        time: completedBar.time + 60000, // next minute timestamp
+        open: completedBar.close,          // new candle opens at the last bar's close
+        high: completedBar.close,
+        low: completedBar.close,
+        close: completedBar.close,
+        volume: 0,                         // start at 0 volume (or adjust as needed)
+      };
   
-      // Start simulation interval for live candle animation every second
-      let simulationIntervalId = setInterval(() => {
-        t++; // Increment time counter (in seconds)
-        const oscillation = Math.sin(t);
-        const newClose = +(basePrice + oscillation * priceAmplitude).toFixed(6);
-        const newHigh = +(basePrice + Math.abs(oscillation) * priceAmplitude).toFixed(6);
-        const newLow = +(basePrice - Math.abs(oscillation) * priceAmplitude).toFixed(6);
-        const newVolume = +(baseVolume + oscillation * volumeAmplitude).toFixed(2);
+      // Set simulation base values from the new simulated candle
+      let basePrice = simulatedBar.open;
+      let baseVolume = simulatedBar.volume;
+      let t = 0; // simulation time counter (seconds)
   
-        const simulatedBar: CandleData = {
-          time: lastBar.time, // keep same timestamp during the current candle
-          open: lastBar.open,
-          high: newHigh,
-          low: newLow,
-          close: newClose,
-          volume: newVolume,
-        };
+      // Use the amplitude of the previous candle as a rough estimate
+      const priceAmplitude = Math.abs(completedBar.close - completedBar.open);
+      const volumeAmplitude = completedBar.volume * 0.1; // adjust as needed
   
-        lastBar = simulatedBar;
-        onRealtimeCallback(simulatedBar);
-      }, 1000);
+      // Function to start simulation (updates every second) for the new candle
+      let simulationIntervalId: any;
+      const startSimulation = () => {
+        simulationIntervalId = setInterval(() => {
+          t++; // increment simulation counter
+          const osc = Math.sin(t); // oscillates between -1 and 1
   
-      // Minute update: fetch two bars from the API
+          // Calculate new simulated values
+          const newClose = +(basePrice + osc * priceAmplitude).toFixed(6);
+          const newHigh = Math.max(simulatedBar.high, newClose);
+          const newLow = Math.min(simulatedBar.low, newClose);
+          // For volume, you might simulate accumulating volume (or oscillatory)
+          const newVolume = +(baseVolume + osc * volumeAmplitude).toFixed(2);
+  
+          simulatedBar = {
+            ...simulatedBar,
+            close: newClose,
+            high: newHigh,
+            low: newLow,
+            volume: newVolume,
+          };
+  
+          onRealtimeCallback(simulatedBar);
+        }, 1000);
+      };
+  
+      // Start the simulation for the new candle
+      startSimulation();
+  
+      // Minute update: fetch two bars from the API every minute
       const minuteIntervalId = setInterval(() => {
         console.log("Fetching latest bars from API...");
   
@@ -285,7 +304,7 @@ export class CustomDataFeed implements IDataFeed {
             if (ohlcvList && ohlcvList.length >= 2) {
               // Sort the fetched list by timestamp (index 0)
               ohlcvList.sort((a: number[], b: number[]) => a[0] - b[0]);
-              // Extract the last two bars
+              // Extract the last two bars:
               const prevData = ohlcvList[ohlcvList.length - 2];
               const currData = ohlcvList[ohlcvList.length - 1];
   
@@ -298,7 +317,7 @@ export class CustomDataFeed implements IDataFeed {
                 volume: prevData[5],
               };
   
-              const newBar: CandleData = {
+              const fetchedNewBar: CandleData = {
                 time: currData[0] * 1000,
                 open: currData[1],
                 high: currData[2],
@@ -308,21 +327,18 @@ export class CustomDataFeed implements IDataFeed {
               };
   
               console.log("Fetched replaced bar:", replacedBar);
-              console.log("Fetched current new bar:", newBar);
+              console.log("Fetched new bar:", fetchedNewBar);
   
-              // Clear the simulation interval so that simulated bar is replaced
+              // Clear the simulation for the current new candle so it can be replaced
               clearInterval(simulationIntervalId);
   
-              // Replace the simulated bar with the fetched replaced bar,
-              // then push the current new bar.
-              // (Assume that the replaced bar corresponds to the current candle
-              // that was being simulated and now must be updated.)
+              // Push the fetched replaced bar to override the simulated value
               onRealtimeCallback(replacedBar);
-              // Also push the current new bar as the new candle.
-              onRealtimeCallback(newBar);
+              // Then push the fetched new bar as the latest candle
+              onRealtimeCallback(fetchedNewBar);
   
-              // Update data_ array: push both bars and clean duplicates
-              data_.push(replacedBar, newBar);
+              // Update the internal data array
+              data_.push(replacedBar, fetchedNewBar);
               data_ = data_
                 .sort((a, b) => a.time - b.time)
                 .reduce((acc: CandleData[], cur) => {
@@ -332,46 +348,38 @@ export class CustomDataFeed implements IDataFeed {
                   return acc;
                 }, []);
   
-              // Update lastBar to the current new bar
-              lastBar = newBar;
+              // Set the new simulated candle for the next interval:
+              simulatedBar = {
+                time: fetchedNewBar.time + 60000,
+                open: fetchedNewBar.close,
+                high: fetchedNewBar.close,
+                low: fetchedNewBar.close,
+                close: fetchedNewBar.close,
+                volume: 0,
+              };
   
-              // Reset simulation base values and counter
-              basePrice = newBar.close;
-              baseVolume = newBar.volume;
+              // Update simulation base values
+              basePrice = simulatedBar.open;
+              baseVolume = simulatedBar.volume;
               t = 0;
   
+              // Update lastBar (for logging or further reference) as fetchedNewBar
+              completedBar = fetchedNewBar;
+  
               // Restart simulation for the new candle
-              simulationIntervalId = setInterval(() => {
-                t++;
-                const oscillation = Math.sin(t);
-                const newClose = +(basePrice + oscillation * priceAmplitude).toFixed(6);
-                const newHigh = +(basePrice + Math.abs(oscillation) * priceAmplitude).toFixed(6);
-                const newLow = +(basePrice - Math.abs(oscillation) * priceAmplitude).toFixed(6);
-                const newVolume = +(baseVolume + oscillation * volumeAmplitude).toFixed(2);
-  
-                const simulatedBar: CandleData = {
-                  time: lastBar.time,
-                  open: lastBar.open,
-                  high: newHigh,
-                  low: newLow,
-                  close: newClose,
-                  volume: newVolume,
-                };
-  
-                lastBar = simulatedBar;
-                onRealtimeCallback(simulatedBar);
-              }, 1000);
+              startSimulation();
             }
           })
           .catch((error) => {
             console.error("Error fetching new bars:", error);
           });
-      }, 60000); // every minute
+      }, 60000); // every 1 minute
   
       // Store intervals for cleanup
       (this as any)[subscribeUID] = { simulationIntervalId, minuteIntervalId };
     });
   }
+  
   
 
   unsubscribeBars(subscribeUID: string): void {

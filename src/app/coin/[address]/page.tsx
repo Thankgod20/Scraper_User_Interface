@@ -6,7 +6,7 @@ import MetricsGrid from '@/components/MetricsGrid';
 import TopTweets from '@/components/TopTweets';
 import { useParams } from "next/navigation";
 import { useMetadata } from '@/context/MetadataContext';
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { CandlestickData } from 'lightweight-charts';
 import TVChart from '@/components/TVChart';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
@@ -254,7 +254,13 @@ export default function Home() {
         volume: entry[5],
       }));
       //console.log("Result chart",mappedData)
-      setChartData(mappedData);
+      //setChartData(mappedData);
+      setChartData((prevData) => {
+        if (JSON.stringify(prevData) !== JSON.stringify(mappedData)) {
+          return mappedData;
+        }
+        return prevData;
+      });
       
     };
    // fetchData();
@@ -420,7 +426,13 @@ export default function Home() {
         value
       })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
       //console.log("emojiArray", emojiArray)
-      setEmojiRawData(emojiArray)
+      //setEmojiRawData(emojiArray)
+      setEmojiRawData(prevData => {
+      const newDataString = JSON.stringify(emojiArray);
+      const prevDataString = JSON.stringify(prevData);
+      
+      return newDataString !== prevDataString ? emojiArray : prevData;
+    });
       setImpressionsData(impressionsArray);
       setTweetsPerMinuteData(tweetsPerMinuteArray);
       setTweetsViewsPerMinuteData(tweetsPerViewsMinuteArray);
@@ -438,8 +450,6 @@ export default function Home() {
     };
     fetchData();
     const fetchHolersData = async () => {
-
-
       const response = await fetch(`http://${window.location.hostname}:3300/fetch-holders?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
       const jsonData = await response.json();
       const holderData: { [key: number]: number } = {};
@@ -457,13 +467,18 @@ export default function Home() {
         time: parseInt(time, 10),
         amount
       })).sort((a, b) => a.time - b.time);
-      setHoldersRawData(holdersArray)
+      setHoldersRawData((prev) => {
+        if (JSON.stringify(prev) !== JSON.stringify(holdersArray)) {
+          return holdersArray;
+        }
+        return prev;
+      });
      // console.log("Holders Data",holderData)
     }
       fetchHolersData()
     const interval = setInterval(() => {
       fetchData();fetchHolersData()
-    }, 600000); // Fetch every 60 seconds
+    }, 60000); // Fetch every 60 seconds
 
     return () => clearInterval(interval);
   }, [address]);
@@ -472,6 +487,7 @@ export default function Home() {
   const [isScriptWidgetReady, setIsScriptWidgetReady] = useState(false);
   const metadata_ = metadata || allMetadata
   //console.log("Metadsss", metadata_)
+  
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
       {/* Header */}
