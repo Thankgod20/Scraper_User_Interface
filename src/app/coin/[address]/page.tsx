@@ -28,6 +28,7 @@ export default function Home() {
   const [manualMetadata, setManualMetadata] = useState<{ name: string; symbol: string; uri: string }>();
   const [allMetadata, setAllMetadata] = useState<{ name: string; symbol: string; description: string; image: string; showName: boolean; createdOn: string; twitter: string; telegram: string; website: string }>();
   //console.log("metadata", metadata, metadata?.twitter)
+  const [tweetsWithAddress, setTweetsWithAddress] = useState<any[]>([]);
   const [impressionsData, setImpressionsData] = useState<Impression[]>([]);
   const [engaments, setEngamentData] = useState<Impression[]>([]);
   const [tweetPerMinute, setTweetsPerMinuteData] = useState<Impression[]>([]);
@@ -309,6 +310,10 @@ export default function Home() {
       return parseFloat(views) * 1000; // Convert "2K" to 2000
     } else if (views.endsWith('M')) {
       return parseFloat(views) * 1000000; // Convert "1M" to 1000000
+    } else if (views.endsWith('k')) {
+      return parseFloat(views) * 1000; // Convert "2K" to 2000
+    } else if (views.endsWith('m')) {
+      return parseFloat(views) * 1000000; // Convert "1M" to 1000000
     }
     return parseFloat(views); // For plain numbers
   };
@@ -331,7 +336,34 @@ export default function Home() {
       const extractedLikes: string[] = [];
       const extractedTimes: string[] = [];
       const extractedProfile: string[] = [];
-      jsonData.forEach((entry: any) => {
+      
+      const filteredTweets = jsonData.filter((entry: any) => {
+        return entry.tweet && entry.tweet.includes(address);
+      });
+      console.log("Twittes with Address",filteredTweets)
+      // Map the filtered tweets to extract tweet, views, and likes
+      const filteredData = filteredTweets.map((entry: any) => {
+        // Assuming that views and likes are stored in entry.params.views and entry.params.likes respectively
+        // and that you want the last value from each array (as seen in your existing code)
+        const views = entry.params.views ? parseViewsCount(entry.params.views[entry.params.views.length - 1]) : 0;
+        const likes = entry.params.likes ? parseViewsCount(entry.params.likes[entry.params.likes.length - 1]) : 0;
+        const timestamp = entry.post_time ? entry.post_time : 0;
+        return {
+          tweet: entry.tweet,
+          views,
+          likes,
+          timestamp,
+          // You can include additional fields if needed
+        };
+      });
+    
+      // Update state with the new filtered data
+      setTweetsWithAddress(filteredData);
+      const validEntries = jsonData.filter((entry: any) => {
+        return entry.tweet && (entry.tweet.includes(address) || entry.tweet.includes(allMetadata?.symbol));
+      });
+      console.log("Valid tweets", validEntries);
+      validEntries.forEach((entry: any) => {
         const times = entry.params.time;
         const views = entry.params.views;
         const likes = entry.params.likes
@@ -369,7 +401,18 @@ export default function Home() {
         const emojiTimeStamp = new Date(timestamp).setSeconds(0, 0);
         times.forEach((time: number, index: number) => {
           const view = isNaN(parseViewsCount(views[index])) ? 0 : parseViewsCount(views[index]);
-          const plot_mint = new Date(eng_time[index]).toISOString().slice(0, 16);
+          //const plot_mint = new Date(eng_time[index]).toISOString().slice(0, 16);
+          const date = new Date(eng_time[index]);
+
+          const pad = (num:any) => num.toString().padStart(2, '0');
+
+          const year = date.getFullYear();
+          const month = pad(date.getMonth() + 1); // Months are zero-based
+          const day = pad(date.getDate());
+          const hours = pad(date.getHours());
+          const minutes = pad(date.getMinutes());
+
+          const plot_mint = `${year}-${month}-${day}T${hours}:${minutes}`;
           const like = isNaN(parseViewsCount(likes[index])) ? 0 : parseViewsCount(likes[index]);
           const comment = isNaN(parseViewsCount(comments[index])) ? 0 : parseViewsCount(comments[index]);
           const retweet = isNaN(parseViewsCount(retweets[index])) ? 0 : parseViewsCount(retweets[index]);
@@ -446,6 +489,7 @@ export default function Home() {
       
       return newDataString !== prevDataString ? emojiArray : prevData;
     });
+    console.log("impressionsArray",impressionsArray)
       setImpressionsData(impressionsArray);
       setTweetsPerMinuteData(tweetsPerMinuteArray);
       setTweetsViewsPerMinuteData(tweetsPerViewsMinuteArray);
@@ -488,13 +532,13 @@ export default function Home() {
       });
      // console.log("Holders Data",holderData)
     }
-      fetchHolersData()
+     // fetchHolersData()
     const interval = setInterval(() => {
-      fetchData();fetchHolersData()
+      fetchData();//fetchHolersData()
     }, 60000); // Fetch every 60 seconds
 
     return () => clearInterval(interval);
-  }, [address]);
+  }, [address,allMetadata]);
 
   const [isScriptReady, setIsScriptReady] = useState(false);
   const [isScriptWidgetReady, setIsScriptWidgetReady] = useState(false);
@@ -549,7 +593,7 @@ export default function Home() {
 
         {/* Right Section (Sidebar) */}
         <aside className="w-full lg:w-1/3 p-4 border-l border-gray-700">
-          <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} tweetPerMinut={tweetPerMinute} impression={impressionsData} engagement={engaments} tweetViews={tweetViewsPerMinute} sentimentPlot={sentimentTimeSeries}/>
+          <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} tweetPerMinut={tweetPerMinute} impression={impressionsData} engagement={engaments} tweetViews={tweetViewsPerMinute} sentimentPlot={sentimentTimeSeries} tweetsWithAddress={tweetsWithAddress}/>
         </aside>
       </main>
     </div>

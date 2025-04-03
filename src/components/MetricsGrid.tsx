@@ -34,7 +34,8 @@ interface MetricGridProps {
   impression: Impression[];
   engagement: Impression[];
   tweetViews: Impression[];
-  sentimentPlot: TimeSeries[]
+  sentimentPlot: TimeSeries[];
+  tweetsWithAddress: { tweet: string; views: number; likes: number; timestamp: string }[];
 }
 
 const MetricCard: React.FC<MetricCardProps> = ({
@@ -192,9 +193,12 @@ function calculateMovingAverage(data: Impression[], windowSize: number): Impress
  */
 function calculateAverageViewsPerTweet(impressionData: Impression[], tweetData: Impression[]): number {
   
-  const totalImpressions = impressionData.reduce((sum, imp) => sum + imp.value, 0);
+  const totalImpressions = impressionData.reduce((sum, imp) => {
+    const value = Number(imp.value);
+    return sum + (isNaN(value) ? 0 : value);
+  }, 0);
   const totalTweets = tweetData.reduce((sum, tweet) => sum + tweet.value, 0);
-  //console.log("Views Per Tweet",totalImpressions)
+  //console.log("Views Per Tweet",impressionData)
   return totalTweets > 0 ? totalImpressions / impressionData.length : 0;
 }
 
@@ -269,12 +273,13 @@ function calculateSentimentTrend(
  * @param smoothWindow - Number of points to use for smoothing the trend.
  * @param totalTweetsThreshold - The tweet count threshold considered as maximum hype (100%).
  * @returns An array of objects with the timestamp and normalized tweet frequency percentage.
- */
+ 
+
 function calculateTweetFrequencyTrendPercentage(
   data: Impression[],
   windowMinutes: number = 5,
   smoothWindow: number = 3,
-  totalTweetsThreshold: number = 100
+  totalTweetsThreshold: number = 20
 ): Impression[] {
   if (data.length === 0) return [];
 
@@ -318,7 +323,53 @@ function calculateTweetFrequencyTrendPercentage(
 
   return normalizedTrend;
 }
+*/
+function calculateTweetFrequencyTrendPercentage(
+  data: Impression[],
+  windowMinutes: number = 5,
+  smoothWindow: number = 3,
+  totalTweetsThreshold: number = 20
+): Impression[] {
+  if (data.length === 0) return [];
 
+  // Sort data by timestamp ascending.
+  const sortedData = [...data].sort(
+    (a, b) => new Date(a.name).getTime() - new Date(b.name).getTime()
+  );
+
+  // Compute raw frequency values using a sliding window.
+  const rawTrend: Impression[] = sortedData.map(point => {
+    const currentTime = new Date(point.name).getTime();
+    const windowStart = currentTime - windowMinutes * 60000;
+    // Count tweets within the window.
+    const frequency = sortedData.filter(p => {
+      const time = new Date(p.name).getTime();
+      return time >= windowStart && time <= currentTime;
+    }).length;
+    return { name: point.name, value: frequency };
+  });
+
+  // Apply a simple moving average to smooth the raw frequency data.
+  function movingAverage(values: Impression[], windowSize: number): Impression[] {
+    return values.map((point, i, arr) => {
+      const start = Math.max(0, i - windowSize + 1);
+      const windowSlice = arr.slice(start, i + 1);
+      const avg = windowSlice.reduce((sum, p) => sum + p.value, 0) / windowSlice.length;
+      return { name: point.name, value: avg };
+    });
+  }
+
+  const smoothedTrend = movingAverage(rawTrend, smoothWindow);
+
+  // Normalize each smoothed frequency value to a percentage.
+  // The maximum expected tweets in the window is defined by totalTweetsThreshold.
+  const normalizedTrend = smoothedTrend.map(point => ({
+    name: point.name,
+    value: Math.min((point.value / totalTweetsThreshold) * 100, 100)
+  }));
+
+  return normalizedTrend;
+}
 
 
 function calculateSentimentVolatility(impressions: Impression[]): number {
@@ -365,24 +416,29 @@ function detectSentimentPeaks(impressions: Impression[]): Impression[] {
 function calculateSentimentScore(
   tweetFrequencyTrend: number, // expected as percentage (0-100)
   sentimentTrend: number,      // expected as percentage (0-100)
-  views: number                // raw view count
+  views: number ,               // raw view count
+  numberTweet: number
 ): number {
+  //console.log(" tweetFrequencyTrend ",tweetFrequencyTrend,sentimentTrend,views,numberTweet)
   // Normalize tweet frequency and sentiment trend to a maximum of 100.
   const normalizedTweetFrequency = Math.min(tweetFrequencyTrend, 100);
-  const normalizedSentimentTrend = Math.min(sentimentTrend, 100);
+  const normalizedSentimentTrend = sentimentTrend*20 >= 100 ? 100 : sentimentTrend*20;//Math.min(sentimentTrend*10, 100);
   
   // Normalize views: if views >= 1000, treat as 100; otherwise, scale linearly.
   const normalizedViews = views >= 1000 ? 100 : (views / 1000) * 100;
+  const normalizedTweetsNum = numberTweet >= 500 ? 100 : (numberTweet / 500) * 100;
   
   // Define weights for each metric (adjust these as needed)
-  const weightTweetFrequency = 0.4;
-  const weightSentimentTrend = 0.3;
-  const weightViews = 0.3;
+  const weightTweetFrequency = 0.35;
+  const weightSentimentTrend = 0.15;
+  const weightViews = 0.25;
+  const tweetWeigh = 0.25;
   
   const sentimentScore =
     normalizedTweetFrequency * weightTweetFrequency +
     normalizedSentimentTrend * weightSentimentTrend +
-    normalizedViews * weightViews;
+    normalizedViews * weightViews +
+    normalizedTweetsNum * tweetWeigh;
     
   // Ensure the final score does not exceed 100.
   return Math.min(sentimentScore, 100);
@@ -473,8 +529,52 @@ function categorizeTweetsByInterval(data: Impression[], minute: number): Impress
   aggregatedData.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
   return aggregatedData;
 }
+const groupTweetsWithAddressByInterval = (
+  data: { timestamp: string; views: number }[],
+  intervalMinutes: number
+): { count: Impression[]; views: Impression[] } => {
+  const intervalMapCount: Record<string, number> = {};
+  const intervalMapViews: Record<string, number> = {};
 
-const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetPerMinut, impression, engagement,tweetViews,sentimentPlot }) => {
+  data.forEach((item) => {
+    const time = new Date(item.timestamp);
+
+    const msInInterval = intervalMinutes * 60 * 1000;
+    const roundedTime = new Date(Math.floor(time.getTime() / msInInterval) * msInInterval);
+    const key = roundedTime.toISOString();
+    if (!intervalMapCount[key]) {
+      intervalMapCount[key] = 0;
+      intervalMapViews[key] = 0;
+    }
+    intervalMapCount[key] += 1;
+    intervalMapViews[key] += item.views;
+  });
+
+  const countArray: Impression[] = Object.entries(intervalMapCount).map(
+    ([name, value]) => ({ name, value })
+  );
+  const viewsArray: Impression[] = Object.entries(intervalMapViews).map(
+    ([name, value]) => ({ name, value })
+  );
+  countArray.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
+  viewsArray.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
+  return { count: countArray, views: viewsArray };
+};
+const parseViewsCount = (views: string): number => {
+  
+  if (views.endsWith('K')) {
+    return parseFloat(views) * 1000; // Convert "2K" to 2000
+  } else if (views.endsWith('M')) {
+    return parseFloat(views) * 1000000; // Convert "1M" to 1000000
+  } else if (views.endsWith('k')) {
+    return parseFloat(views) * 1000; // Convert "2K" to 2000
+  } else if (views.endsWith('m')) {
+    return parseFloat(views) * 1000000; // Convert "1M" to 1000000
+  }
+  return parseFloat(views); // For plain numbers
+};
+
+const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetPerMinut, impression, engagement,tweetViews,sentimentPlot,tweetsWithAddress }) => {
   let twt = `https://x.com/search?q=${address}`;
   if (twitter != null) {
     twt = twitter;
@@ -518,10 +618,23 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   const sentimentVolatility = calculateSentimentVolatility(impression);
   const weightedSentiment = calculateSentimentWeightedMetrics(impression, engagement);
   const sentimentPeaks = detectSentimentPeaks(impression);
-  const tweetFrequencyTrend = calculateTweetFrequencyTrendPercentage(tweetPerMinut, 5, 14);
+  const tweetFrequencyTrend = calculateTweetFrequencyTrendPercentage(tweetPerMinut, 15, 9,20);
   const sentimentTrend = calculateSentimentTrend(sentimentPlot, 30);
   const currentSentimentTrend = sentimentTrend[sentimentTrend.length - 1]?.aggregatedSentiment || 0;
+  const currentTweetFrequencyTrend = tweetFrequencyTrend[tweetFrequencyTrend.length - 1]?.value || 0;
   const rawViews = avgViewsPerTweet; 
+  const avgLstView = calculateAverageViewsPerTweet(tweetViewsPerFVmints.slice(-15),tweetViewsPerFVmints.slice(-15))
+
+  //console.log("AVGGGGG",avgLstView,tweetViewsPerFVmints.slice(-15),tweetViewsPerFVmints.slice(-15))
+  const { count: tweetsWithAddressCount, views: tweetsWithAddressViews } = groupTweetsWithAddressByInterval(
+    tweetsWithAddress,
+    5
+  );
+  const tweetsWithAddressFrequency = calculateTweetFrequencyTrendPercentage(tweetsWithAddressCount, 15, 9, 10);
+  const currentTweetWiAddFrequencyTrend = tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1]?.value || 0;
+  const tweetwithAddAvgViews = calculateAverageViewsPerTweet(tweetsWithAddressViews, tweetsWithAddressCount);
+  const tweetwithAddAvgViewsS = calculateAverageViewsPerTweet(tweetsWithAddressViews.slice(-15), tweetsWithAddressCount.slice(-15));
+  //console.log("Average View per Tweet",tweetsWithAddressViews)
   const openPopup = (title: string, data: Impression[]) => {
     setSelectedMetric({ title, data });
   };
@@ -537,7 +650,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   useEffect(() => {
     Modal.setAppElement("#root");
   }, []);
-
+  //console.log(" SSDDDD ",NumberFormatter.formatNumber(Number(((Number(parseViewsCount(totalTweets))/avgViewsPerTweet)*100).toFixed(2))),parseViewsCount(totalTweets),avgViewsPerTweet)
   return (
     <div className="bg-gray-800 text-white rounded-lg p-4 shadow-lg max-w-md ">
       <div id="root"></div>
@@ -587,6 +700,22 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
           onClick={() => openPopup("Tweet Frequency Trend", tweetFrequencyTrend)}
         />
         <MetricCard
+          title="Tweet w/ Address Frequency (%)"
+          value={
+            tweetsWithAddressFrequency.length > 0
+              ? tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1].value.toFixed(2) + "%"
+              : "0%"
+          }
+          percentageChange=""
+          subText="Frequency trend for tweets with address"
+          isPositiveChange={
+            tweetsWithAddressFrequency.length > 0 &&
+            tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1].value > 0
+          }
+          graph={<LineGraph data={tweetsWithAddressFrequency} color="#34D399" />}
+          onClick={() => openPopup("Tweet w/ Address Frequency", tweetsWithAddressFrequency)}
+        />
+        <MetricCard
           title="Callers/min (Avg.)"
           value={totalTweets}
           percentageChange={(averagePercentage > 0 ? "+" : "") + averagePercentage.toFixed(2) + "%"}
@@ -603,6 +732,20 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
           isPositiveChange={averagePercentageFv > 0}
           graph={<LineGraph data={tweetPerFVmints} color="#10B981" />}
           onClick={() => openPopup("Callers/5min (Avg.)", tweetPerFVmints)}
+        />
+        <MetricCard
+          title="Tweets w/ Address (5min Count)"
+          value={
+            tweetsWithAddressCount.length.toString()
+          }
+          percentageChange=""
+          subText="Number of tweets with address per 5 minutes"
+          isPositiveChange={
+            tweetsWithAddressCount.length > 0 &&
+            tweetsWithAddressCount[tweetsWithAddressCount.length - 1].value > 0
+          }
+          graph={<LineGraph data={tweetsWithAddressCount} color="#60A5FA" />}
+          onClick={() => openPopup("Tweets w/ Address Count", tweetsWithAddressCount)}
         />
         <MetricCard
           title="Impression Growth"
@@ -640,9 +783,22 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
           graph={<LineGraph data={tweetViewsPerFVmints} color="#3B82F6" />}
           onClick={() => openPopup("Average Views/Tweet", tweetViewsPerFVmints)}
         />
+        <MetricCard
+            title="Views for Tweets w/ Address (5min)"
+            value={NumberFormatter.formatNumber(Number(tweetwithAddAvgViews.toFixed(2)))}
+              
+            percentageChange=""
+            subText="Aggregated views per 5 minutes for tweets with address"
+            isPositiveChange={
+              tweetsWithAddressViews.length > 0 &&
+              tweetsWithAddressViews[tweetsWithAddressViews.length - 1].value > 0
+            }
+            graph={<LineGraph data={tweetsWithAddressViews} color="#F87171" />}
+            onClick={() => openPopup("Views for Tweets w/ Address", tweetsWithAddressViews)}
+          />
           <MetricCard
           title="AvgTweetMade/AvgViews"
-          value={NumberFormatter.formatNumber(Number(((Number(totalTweets)/avgViewsPerTweet)*100).toFixed(2)))}
+          value={NumberFormatter.formatNumber(Number(((Number(parseViewsCount(totalTweets))/avgViewsPerTweet)*100).toFixed(2)))}
           percentageChange=""
           subText="Overall Interest of callers"
           isPositiveChange={avgViewsPerTweet >= 0}
@@ -651,8 +807,10 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
         />
       </div>
       <div style={{ textAlign: "center", padding: "20px" }}>
-        <h1>Sentiment Meter</h1>
-        <SentimentMeter value={Math.round(calculateSentimentScore(tweetGrowthPercentage, currentSentimentTrend, rawViews))} />
+        <h1>Hype Meter</h1>
+        <SentimentMeter value={Math.round(calculateSentimentScore(currentTweetFrequencyTrend, currentSentimentTrend,avgLstView,Number(totalTweets) ))} />
+        <h1>Hype Meter For Address</h1>
+        <SentimentMeter value={Math.round(calculateSentimentScore(currentTweetWiAddFrequencyTrend, currentSentimentTrend,tweetwithAddAvgViewsS,tweetsWithAddressCount.length ))} />
       </div>
       <Modal
         isOpen={!!selectedMetric || !!selectedTimeMetric}
@@ -701,10 +859,10 @@ const SentimentMeter: React.FC<SentimentMeterProps> = ({ value }) => {
   const rotation = (boundedValue / 100) * 180 - 90;
   const sentimentLabel =
     boundedValue < 25
-      ? "Fear"
+      ? "Dead"
       : boundedValue < 50
-      ? "Caution"
-      : boundedValue < 75
+      ? "Low"
+      : boundedValue < 70
       ? "Neutral"
       : "Confidence";
   const labelColor =

@@ -12,7 +12,15 @@ import {
 } from "chart.js";
 
 // Register Chart.js modules
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
+ChartJS.register(
+    CategoryScale, 
+    LinearScale, 
+    PointElement, 
+    LineElement, 
+    Title, 
+    Tooltip, 
+    Legend
+);
 
 interface LineGraphProps {
     data: { name: string; value: number }[];
@@ -20,11 +28,15 @@ interface LineGraphProps {
     detailed?: boolean; // Toggle for more detailed chart rendering
 }
 
-const DLineGraph: React.FC<LineGraphProps> = ({ data, color = "#3B82F6", detailed = false }) => {
+const DLineGraph: React.FC<LineGraphProps> = ({ 
+    data, 
+    color = "#3B82F6", 
+    detailed = false 
+}) => {
     // Transform data for the chart
     const labels = data.map((item) => item.name); // X-axis labels (timestamps)
-    const values = data.map((item) => item.value); // Y-axis values
-
+    const values = data.map((item) => item.value); // Y-axis values 
+    
     const chartData = {
         labels,
         datasets: [
@@ -40,7 +52,7 @@ const DLineGraph: React.FC<LineGraphProps> = ({ data, color = "#3B82F6", detaile
             },
         ],
     };
-
+    
     const options = {
         responsive: true,
         maintainAspectRatio: false, // Allows for custom height
@@ -84,7 +96,7 @@ const DLineGraph: React.FC<LineGraphProps> = ({ data, color = "#3B82F6", detaile
             },
         },
     };
-
+    
     return (
         <div
             className="bg-gray-800 rounded-lg p-6 shadow-md"
