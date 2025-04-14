@@ -34,7 +34,7 @@ export default function Home() {
   const [tweetPerMinute, setTweetsPerMinuteData] = useState<Impression[]>([]);
   const [tweetViewsPerMinute, setTweetsViewsPerMinuteData] = useState<Impression[]>([]);
   const [emojiRawData, setEmojiRawData] = useState<{ em_time: number, emoji: string }[]>([]);
-  const [holderRawData, setHoldersRawData] = useState<{ amount: number, time: number }[]>([]);
+  const [holderRawData, setHoldersRawData] = useState<{ amount: number, price: number }[]>([]);
   const [usernames, setUsernames] = useState<string[]>([]);
   const [tweets, setTweets] = useState<string[]>([]);
   const [likes, setLikes] = useState<string[]>([]);
@@ -43,6 +43,7 @@ export default function Home() {
   const [profile, setProfile] = useState<string[]>([]);
 
   const [chartData, setChartData] = useState<RawTradeData[]>([]);
+  const [livePrice, setLivePrice] = useState<RawTradeData[]>([]);
   const [totalchartData, setTotalChartData] = useState<RawTradeData[]>([]);
   const [sentimentTimeSeries, setSentimentTimeSeries] = useState<{ time: string; aggregatedSentiment: number }[]>([]);
   // Overall aggregated sentiment and pump prediction across all tweets (optional)
@@ -52,15 +53,15 @@ export default function Home() {
   const options = {
     extras: {
       // Single words & tokens for phrases
-      'bundles': -5,
-      'control': -5,
-      'manipulate': -3,
+      'bundles': -15,
+      'control': -15,
+      'manipulate': -13,
       'market': -2,
-      'doesn\'t_look': -2,
-      'SCAM': -5,
-      'scam': -5,
-      'dump': -3,
-      'rug': -5,
+      'doesn\'t_look': -12,
+      'SCAM': -15,
+      'scam': -15,
+      'dump': -13,
+      'rug': -15,
       'dex': 2,
       'KOL': 2,
       'bullish': 2,
@@ -75,13 +76,26 @@ export default function Home() {
       '1000x': 2,
       'moon': 2,
       // Additional phrases can be added here
-      'not_safe': -3,
-      'poor_quality': -4,
-      'high_risk': -5,
-      'low_confidence': -3,
+      'not_safe': -13,
+      'poor_quality': -14,
+      'high_risk': -15,
+      'low_confidence': -13,
     }
   };
-  
+  const fetchHostnameFromConfig = async () => {
+    try {
+      const configResponse = await fetch('/config.json');
+      if (!configResponse.ok) {
+        throw new Error('Failed to load config file');
+      }
+      const configData = await configResponse.json();
+      console.log("Configuration",configData)
+      return configData.hostname; // Return the hostname from the config
+    } catch (error) {
+      console.error('Error fetching hostname from config:', error);
+      throw error;
+    }
+  };
   // Preprocessing function to replace known multi-word phrases with a single token
   const preprocessText = (text:string) => {
     const phrases = [
@@ -186,7 +200,9 @@ export default function Home() {
       if (!metadata) {
         // console.log("addresses", addresses, "address", address.address)
         try {
-          const response = await fetch(`http://${window.location.hostname}:3300/api/token-metadata?mint=${address}`);
+          const hostname = await fetchHostnameFromConfig();
+          console.log("hostname",hostname)
+          const response = await fetch(`http://${hostname}:3300/api/token-metadata?mint=${address}`);
           const data = await response.json();
           //fetchedMetadata.push(data);
           setManualMetadata(data)
@@ -266,12 +282,38 @@ export default function Home() {
     };
    // fetchData();
     fetchRaydiumData();
-    /*const interval = setInterval(() => {
-     // fetchData();
-      fetchRaydiumData();
-    }, 600000); // Fetch every 60 seconds
-
-    return () => clearInterval(interval);*/ // Clean up interval on component unmount
+    const fetchRaydiumLive = async () => {
+      const response = await fetch('/api/live', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ address }),
+      });
+      const result = await response.json();
+      //console.log("Result chart",result.data.attributes.ohlcv_list)
+      const mappedData: RawTradeData[] = result.data.attributes.ohlcv_list.map((entry: number[]) => ({
+        time: entry[0],
+        open: entry[1],
+        high: entry[2],
+        low: entry[3],
+        close: entry[4],
+        volume: entry[5],
+      }));
+      //console.log("Result chart",mappedData)
+      //setChartData(mappedData);
+      setLivePrice((prevData) => {
+        if (JSON.stringify(prevData) !== JSON.stringify(mappedData)) {
+          return mappedData;
+        }
+        return prevData;
+      });
+      
+    };
+    fetchRaydiumLive()
+    const interval = setInterval(() => {
+      fetchRaydiumLive()
+    }, 60000); 
   }, [address]);
   type BusinessDay = { year: number; month: number; day: number };
 
@@ -320,8 +362,8 @@ export default function Home() {
   useEffect(() => {
     const fetchData = async () => {
 
-
-      const response = await fetch(`http://${window.location.hostname}:3300/fetch-data?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
+      const hostname = await fetchHostnameFromConfig();
+      const response = await fetch(`http://${hostname}:3300/fetch-data?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
       const jsonData = await response.json();
 
       // Process data to calculate total views for each unique time
@@ -507,34 +549,44 @@ export default function Home() {
     };
     fetchData();
     const fetchHolersData = async () => {
-      const response = await fetch(`http://${window.location.hostname}:3300/fetch-holders?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
-      const jsonData = await response.json();
-      const holderData: { [key: number]: number } = {};
-      jsonData.forEach((entry: any) => {
-        const timestamp = entry.time;
-        const amount = parseFloat(entry.amount);
-        const holderTimeStamp = new Date(timestamp).setSeconds(0, 0);
-        if (holderData[holderTimeStamp]) {
-          holderData[holderTimeStamp]+=amount
-        } else {
-          holderData[holderTimeStamp]=amount
-        }
-      })
-      const holdersArray = Object.entries(holderData).map(([time, amount]) => ({
-        time: parseInt(time, 10),
-        amount
-      })).sort((a, b) => a.time - b.time);
-      setHoldersRawData((prev) => {
-        if (JSON.stringify(prev) !== JSON.stringify(holdersArray)) {
-          return holdersArray;
-        }
-        return prev;
-      });
-     // console.log("Holders Data",holderData)
-    }
-     // fetchHolersData()
+      try {
+        const hostname = await fetchHostnameFromConfig();
+        const response = await fetch(`http://${hostname}:3300/fetch-holders?search=${address}`);
+        const jsonData = await response.json();
+    
+        // Aggregate data by price
+        const holderData: { [key: number]: number } = {};
+        jsonData.forEach((entry: any) => {
+          const price = parseFloat(entry.price);
+          const amount = parseFloat(entry.amount);
+          // If this price already exists, add to the current amount; otherwise, create a new entry.
+          if (holderData[price] !== undefined) {
+            holderData[price] += amount;
+          } else {
+            holderData[price] = amount;
+          }
+        });
+    
+        // Convert aggregated object to an array of objects with numerical price and amount.
+        const holdersArray = Object.entries(holderData).map(([price, amount]) => ({
+          price: parseFloat(price),
+          amount,
+        }));
+    
+        // Only update state if the new data differs from the current state.
+        setHoldersRawData((prev) => {
+          if (JSON.stringify(prev) !== JSON.stringify(holdersArray)) {
+            return holdersArray;
+          }
+          return prev;
+        });
+      } catch (error) {
+        console.error('Error fetching holders data:', error);
+      }
+    };
+     fetchHolersData()
     const interval = setInterval(() => {
-      fetchData();//fetchHolersData()
+      fetchData();fetchHolersData()
     }, 60000); // Fetch every 60 seconds
 
     return () => clearInterval(interval);
@@ -581,7 +633,7 @@ export default function Home() {
                 setIsScriptWidgetReady(true);
               }}
             />
-            {isScriptReady && isScriptWidgetReady && <TVChartContainer data={totalchartData} name={metadata_?.name} address={address} symbol={metadata_?.symbol} emojiData={emojiRawData} holders={holderRawData} />}
+            {isScriptReady && isScriptWidgetReady && <TVChartContainer data={totalchartData} name={metadata_?.name} address={address} symbol={metadata_?.symbol} emojiData={emojiRawData} />}
           </div>
 
           {/* <Chart name={metadata?.name} symbol={metadata?.symbol} />*/}
@@ -593,7 +645,7 @@ export default function Home() {
 
         {/* Right Section (Sidebar) */}
         <aside className="w-full lg:w-1/3 p-4 border-l border-gray-700">
-          <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} tweetPerMinut={tweetPerMinute} impression={impressionsData} engagement={engaments} tweetViews={tweetViewsPerMinute} sentimentPlot={sentimentTimeSeries} tweetsWithAddress={tweetsWithAddress}/>
+          <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} tweetPerMinut={tweetPerMinute} impression={impressionsData} engagement={engaments} tweetViews={tweetViewsPerMinute} sentimentPlot={sentimentTimeSeries} tweetsWithAddress={tweetsWithAddress} holders={holderRawData} live_prx={livePrice}/>
         </aside>
       </main>
     </div>

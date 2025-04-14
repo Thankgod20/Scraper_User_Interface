@@ -10,7 +10,7 @@ interface TVChartContainerProps {
   address: string;
   symbol: any;
   emojiData: { em_time: number; emoji: string }[];
-  holders: { amount: number; time: number }[];
+  //holders: { amount: number; time: number }[];
 }
 
 function isTimestampIn15MinuteRange(
@@ -171,7 +171,7 @@ const TVChartContainer: React.FC<TVChartContainerProps> = ({
       : null;
 
     if (lastCandleTime) {
-      holders.forEach((holder) => {
+      /*holders.forEach((holder) => {
         const matchedCandle = datass.find((candle) =>
           isTimestampIn15MinuteRange(holder.time, candle.time)
         );
@@ -212,7 +212,7 @@ const TVChartContainer: React.FC<TVChartContainerProps> = ({
             zOrder: 'below_main_series',
           }
         );
-      });
+      });*/
     }
   }, [holders, data]);
 

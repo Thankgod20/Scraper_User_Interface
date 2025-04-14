@@ -4,9 +4,18 @@ import LineGraphTimeS from "./LineGraphTimeS"
 import DLineGraph from './DetailedLineGraph';
 import { NumberFormatter } from '@/app/utils/largeNumber';
 import { QRCodeCanvas } from "qrcode.react"; // Ensure you install this package: npm install qrcode.react
+import { CandleData, RawTradeData } from '@/app/types/TradingView';
 import Modal from "react-modal";
 import ReactDOM from "react-dom";
 import LineGraphTimeD from "./LineGraphTimeD"
+import BarGraph from './BarChar';
+import BarGraph_Main from './BarChar_Main';
+import MarketDepthChart from './MarketDepth';
+//import BarChartCard from './BarChartCard';
+import dynamic from 'next/dynamic';
+
+// Dynamically import BarChartCard with SSR disabled.
+const BarChartCard = dynamic(() => import('./BarChartCard'), { ssr: false });
 //Modal.setAppElement("#root");
 
 interface MetricCardProps {
@@ -36,8 +45,23 @@ interface MetricGridProps {
   tweetViews: Impression[];
   sentimentPlot: TimeSeries[];
   tweetsWithAddress: { tweet: string; views: number; likes: number; timestamp: string }[];
+  holders: {amount: number;price: number;}[]
+  live_prx: RawTradeData[]
 }
+interface Props {
+  children?: React.ReactNode;
+}
+const ClientOnly: React.FC<Props> = ({ children }) => {
+  const [mounted, setMounted] = React.useState(false);
 
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
+
+  return <>{children}</>;
+};
 const MetricCard: React.FC<MetricCardProps> = ({
   title,
   value,
@@ -274,7 +298,7 @@ function calculateSentimentTrend(
  * @param totalTweetsThreshold - The tweet count threshold considered as maximum hype (100%).
  * @returns An array of objects with the timestamp and normalized tweet frequency percentage.
  
-
+*//*
 function calculateTweetFrequencyTrendPercentage(
   data: Impression[],
   windowMinutes: number = 5,
@@ -323,7 +347,55 @@ function calculateTweetFrequencyTrendPercentage(
 
   return normalizedTrend;
 }
-*/
+function calculateTweetFrequencyTrendPercentage(
+  data: Impression[],
+  windowMinutes: number = 5,
+  smoothWindow: number = 3,
+  tweetsPerMinuteThreshold: number = 5
+): Impression[] {
+  if (data.length === 0) return [];
+  // Sort data by timestamp ascending.
+  const sortedData = [...data].sort(
+    (a, b) => new Date(a.name).getTime() - new Date(b.name).getTime()
+  );
+  
+  // Compute raw frequency values using a sliding window.
+  const rawTrend: Impression[] = sortedData.map(point => {
+    const currentTime = new Date(point.name).getTime();
+    const windowStart = currentTime - windowMinutes * 60000;
+    // Count tweets within the window.
+    const frequency = sortedData
+      .filter(p => {
+         const time = new Date(p.name).getTime();
+         return time >= windowStart && time <= currentTime;
+      })
+      .reduce((sum, p) => sum + p.value, 0);
+    return { name: point.name, value: frequency };
+  });
+  
+  // Apply a moving average to smooth the raw frequency data.
+  function movingAverage(values: Impression[], windowSize: number): Impression[] {
+    return values.map((point, i, arr) => {
+      const start = Math.max(0, i - windowSize + 1);
+      const window = arr.slice(start, i + 1);
+      const avg = window.reduce((sum, p) => sum + p.value, 0) / window.length;
+      return { name: point.name, value: avg };
+    });
+  }
+  
+  const smoothedTrend = movingAverage(rawTrend, smoothWindow);
+  
+  // Normalize each smoothed frequency value to a percentage.
+  // Maximum expected tweets in the window is tweetsPerMinuteThreshold * windowMinutes.
+  const maxTweetsPossible = tweetsPerMinuteThreshold * windowMinutes;
+  const normalizedTrend = smoothedTrend.map(point => ({
+      name: point.name,
+      value: Math.min(100, (point.value / maxTweetsPossible) * 100)
+  }));
+  
+  return normalizedTrend;
+}*/
+
 function calculateTweetFrequencyTrendPercentage(
   data: Impression[],
   windowMinutes: number = 5,
@@ -336,7 +408,7 @@ function calculateTweetFrequencyTrendPercentage(
   const sortedData = [...data].sort(
     (a, b) => new Date(a.name).getTime() - new Date(b.name).getTime()
   );
-
+  console.log("rawTrend",sortedData)
   // Compute raw frequency values using a sliding window.
   const rawTrend: Impression[] = sortedData.map(point => {
     const currentTime = new Date(point.name).getTime();
@@ -348,7 +420,7 @@ function calculateTweetFrequencyTrendPercentage(
     }).length;
     return { name: point.name, value: frequency };
   });
-
+  
   // Apply a simple moving average to smooth the raw frequency data.
   function movingAverage(values: Impression[], windowSize: number): Impression[] {
     return values.map((point, i, arr) => {
@@ -358,9 +430,9 @@ function calculateTweetFrequencyTrendPercentage(
       return { name: point.name, value: avg };
     });
   }
-
+  
   const smoothedTrend = movingAverage(rawTrend, smoothWindow);
-
+  
   // Normalize each smoothed frequency value to a percentage.
   // The maximum expected tweets in the window is defined by totalTweetsThreshold.
   const normalizedTrend = smoothedTrend.map(point => ({
@@ -482,23 +554,13 @@ function calculateSentimentMomentumPlot(impressions: Impression[]): Impression[]
 }
   
 function calculateCumulativePercentage(impressions: Impression[]): Impression[] {
-  if (impressions.length < 2) return impressions;
-  const result: Impression[] = [];
-  let cumulativeSum = 0;
-  for (let i = 0; i < impressions.length; i++) {
-    if (i === 0) {
-      result.push({ name: impressions[i].name, value: 0 });
-    } else {
-      const prevValue = impressions[i - 1].value;
-      const currValue = impressions[i].value;
-      if (prevValue !== 0) {
-        const percentageDiff = ((currValue - prevValue) / prevValue);
-        cumulativeSum += percentageDiff;
-      }
-      result.push({ name: impressions[i].name, value: cumulativeSum });
-    }
-  }
-  return result;
+  if (impressions.length === 0) return [];
+  
+  const initialValue = impressions[0].value;
+  return impressions.map((imp, index) => ({
+    name: imp.name,
+    value: index === 0 ? 0 : (imp.value - initialValue) / initialValue
+  }));
 }
 
 function categorizeTweetsByInterval(data: Impression[], minute: number): Impression[] {
@@ -574,13 +636,15 @@ const parseViewsCount = (views: string): number => {
   return parseFloat(views); // For plain numbers
 };
 
-const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetPerMinut, impression, engagement,tweetViews,sentimentPlot,tweetsWithAddress }) => {
+const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetPerMinut, impression, engagement,tweetViews,sentimentPlot,tweetsWithAddress,holders,live_prx }) => {
   let twt = `https://x.com/search?q=${address}`;
   if (twitter != null) {
     twt = twitter;
   }
   const [selectedMetric, setSelectedMetric] = useState<{ title: string; data: Impression[] | null } | null>(null);
   const [selectedTimeMetric, setSelectedTimeMetric] = useState<{ title: string; data: TimeSeries[] | null } | null>(null);
+  const [selectedbarMetric, setSelectedbarMetric] = useState<{ title: string; data: Impression[] | null } | null>(null);
+  const [showMarketDepthModal, setShowMarketDepthModal] = useState(false);
   const totalTweets_ = tweetPerMinut.reduce((sum, tweet) => sum + tweet.value, 0);
   const totalTweets = NumberFormatter.formatNumber(totalTweets_);
   const tweetViewsPerFVmints = categorizeTweetsByInterval(tweetViews, 5);
@@ -595,6 +659,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
     tweetPerFVmints,
     tweetViews
   );
+  
   //calculateTweetViewsRatioPercentage(tweetPerTnmints,movingAverageTweetViews)
   // Calculate tweet growth based on the 5-minute grouping.
   const tweetGrowthPercentage = calculateTweetGrowthFromGroupedData(tweetPerFVmints, 5);
@@ -606,19 +671,20 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   const averageViewsPlot = calculateAverageViewsPlot(tweetPerMinut, impression);
 
   const averagePercentageFv = calculateAveragePercentage(tweetPerFVmints);
-  const cummulatedSumFv = calculateCumulativePercentage(tweetPerFVmints);
+  //const cummulatedSumFv = calculateCumulativePercentage(tweetPerFVmints);
   const averagePercentage = calculateAveragePercentage(tweetPerMinut);
-  const cummulatedSum = calculateCumulativePercentage(tweetPerMinut);
+  //const cummulatedSum = calculateCumulativePercentage(tweetPerMinut);
   const cumuImpression = calculateCumulativePercentage(impression);
+  //console.log("Impression",impression)
   const cumuAvrage = calculateAveragePercentage(impression);
-  const cumuEngage = calculateCumulativePercentage(engagement);
+  //const cumuEngage = calculateCumulativePercentage(engagement);
   const cumuAvragEngage = calculateAveragePercentage(engagement);
   const sentimentMomentum = calculateSentimentMomentum(impression);
   const sentimentMomentumPlot = calculateSentimentMomentumPlot(impression);
   const sentimentVolatility = calculateSentimentVolatility(impression);
   const weightedSentiment = calculateSentimentWeightedMetrics(impression, engagement);
   const sentimentPeaks = detectSentimentPeaks(impression);
-  const tweetFrequencyTrend = calculateTweetFrequencyTrendPercentage(tweetPerMinut, 15, 9,20);
+  const tweetFrequencyTrend = calculateTweetFrequencyTrendPercentage(tweetPerMinut, 10, 5,10);
   const sentimentTrend = calculateSentimentTrend(sentimentPlot, 30);
   const currentSentimentTrend = sentimentTrend[sentimentTrend.length - 1]?.aggregatedSentiment || 0;
   const currentTweetFrequencyTrend = tweetFrequencyTrend[tweetFrequencyTrend.length - 1]?.value || 0;
@@ -630,21 +696,25 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
     tweetsWithAddress,
     5
   );
-  const tweetsWithAddressFrequency = calculateTweetFrequencyTrendPercentage(tweetsWithAddressCount, 15, 9, 10);
+  const tweetsWithAddressFrequency = calculateTweetFrequencyTrendPercentage(tweetsWithAddressCount, 10, 5, 10);
   const currentTweetWiAddFrequencyTrend = tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1]?.value || 0;
   const tweetwithAddAvgViews = calculateAverageViewsPerTweet(tweetsWithAddressViews, tweetsWithAddressCount);
   const tweetwithAddAvgViewsS = calculateAverageViewsPerTweet(tweetsWithAddressViews.slice(-15), tweetsWithAddressCount.slice(-15));
-  //console.log("Average View per Tweet",tweetsWithAddressViews)
+  console.log("Average Holders per Tweet",holders,"Live Price",live_prx)
   const openPopup = (title: string, data: Impression[]) => {
     setSelectedMetric({ title, data });
   };
   const openPopupTime = (title: string, data: TimeSeries[]) => {
     setSelectedTimeMetric({ title, data });
   };
+  const openPopupBar = (title: string, data: Impression[]) => {
+    setSelectedbarMetric({ title, data });
+  };
 
   const closePopup = () => {
     setSelectedMetric(null);
     setSelectedTimeMetric(null);
+    setSelectedbarMetric(null)
   };
 
   useEffect(() => {
@@ -689,7 +759,14 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
           DexScreener
         </a>
       </div>
+      <div className="md:col-span-1 h-64 cursor-pointer" onClick={() => setShowMarketDepthModal(true)}> {/* Adjust height (h-64) as needed */}
+            <MarketDepthChart
+                orderBookData={holders}
+                livePriceData={live_prx}
+            />
+        </div>
       <div className="grid grid-cols-2 gap-4 h-[50vh] overflow-y-auto">
+      
       <MetricCard
           title="Tweet Frequency Trend (%)"
           value={tweetFrequencyTrend.length > 0 ? tweetFrequencyTrend[tweetFrequencyTrend.length - 1].value.toFixed(2) +"%": "0%"}
@@ -780,8 +857,8 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
           percentageChange=""
           subText="Overall average views per tweet"
           isPositiveChange={avgViewsPerTweet >= 0}
-          graph={<LineGraph data={tweetViewsPerFVmints} color="#3B82F6" />}
-          onClick={() => openPopup("Average Views/Tweet", tweetViewsPerFVmints)}
+          graph={<BarGraph data={tweetViewsPerFVmints}/>}
+          onClick={() => openPopupBar("Average Views/Tweet", tweetViewsPerFVmints)}
         />
         <MetricCard
             title="Views for Tweets w/ Address (5min)"
@@ -793,8 +870,8 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
               tweetsWithAddressViews.length > 0 &&
               tweetsWithAddressViews[tweetsWithAddressViews.length - 1].value > 0
             }
-            graph={<LineGraph data={tweetsWithAddressViews} color="#F87171" />}
-            onClick={() => openPopup("Views for Tweets w/ Address", tweetsWithAddressViews)}
+            graph={<BarGraph data={tweetsWithAddressViews}  />}
+            onClick={() => openPopupBar("Views for Tweets w/ Address", tweetsWithAddressViews)}
           />
           <MetricCard
           title="AvgTweetMade/AvgViews"
@@ -812,8 +889,45 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
         <h1>Hype Meter For Address</h1>
         <SentimentMeter value={Math.round(calculateSentimentScore(currentTweetWiAddFrequencyTrend, currentSentimentTrend,tweetwithAddAvgViewsS,tweetsWithAddressCount.length ))} />
       </div>
+      {/* Modal for Market Depth Chart Popup */}
       <Modal
-        isOpen={!!selectedMetric || !!selectedTimeMetric}
+        isOpen={showMarketDepthModal}
+        onRequestClose={() => setShowMarketDepthModal(false)}
+        contentLabel="Market Depth Popup"
+        style={{
+          content: {
+            top: '0',
+            left: '0',
+            right: '0',
+            bottom: '0',
+            padding: '1rem',
+            background: '#1F2937', // Tailwind gray-800 color
+            border: 'none'
+          },
+          overlay: {
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            zIndex: 1000
+          }
+        }}
+      >
+        <div className="h-full flex flex-col">
+          <h2 className="text-2xl text-white mb-4">Market Depth</h2>
+          <div className="flex-grow">
+            <MarketDepthChart
+              orderBookData={holders}
+              livePriceData={live_prx}
+            />
+          </div>
+          <button
+            onClick={() => setShowMarketDepthModal(false)}
+            className="mt-4 bg-gray-700 text-white py-2 px-4 rounded self-end"
+          >
+            Close
+          </button>
+        </div>
+      </Modal>
+      <Modal
+        isOpen={!!selectedMetric || !!selectedTimeMetric || !!selectedbarMetric}
         onRequestClose={closePopup}
         contentLabel="Metric Details"
         className="bg-gray-900 text-white w-[90vw] max-w-[1400px] h-[85vh] mx-auto rounded-lg p-6 shadow-lg"
@@ -834,6 +948,17 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
           <>
             <h3 className="text-xl font-bold mb-4">{selectedTimeMetric.title}</h3>
             <LineGraphTimeD data={selectedTimeMetric.data || []} color="#3B82F6" />
+            <button
+              className="mt-6 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded"
+              onClick={closePopup}
+            >
+              Close
+            </button>
+          </>
+        ) || selectedbarMetric && (
+          <>
+            <h3 className="text-xl font-bold mb-4">{selectedbarMetric.title}</h3>
+            <BarGraph_Main data={selectedbarMetric.data || []}/>
             <button
               className="mt-6 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded"
               onClick={closePopup}
