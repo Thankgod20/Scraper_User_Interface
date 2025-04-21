@@ -663,7 +663,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   }, []);
   //console.log(" SSDDDD ",NumberFormatter.formatNumber(Number(((Number(parseViewsCount(totalTweets))/avgViewsPerTweet)*100).toFixed(2))),parseViewsCount(totalTweets),avgViewsPerTweet)
   return (
-    <div className="bg-gray-800 text-white rounded-lg p-4 shadow-lg max-w-md ">
+    <div className="bg-gray-800 text-white rounded-lg p-4 shadow-lg w-full">
       <div id="root"></div>
       <div className="flex items-center justify-between mb-4">
         <div className="flex-grow border-100 border-black rounded-[5px] p-2">
@@ -986,104 +986,3 @@ const SentimentMeter: React.FC<SentimentMeterProps> = ({ score }) => {
     </div>
   );
 };
-/*
-const SentimentMeter: React.FC<SentimentMeterProps> = ({ value }) => {
-  const boundedValue = Math.min(100, Math.max(0, value));
-  const rotation = (boundedValue / 100) * 180 - 90;
-  const sentimentLabel =
-    boundedValue < 25
-      ? "Dead"
-      : boundedValue < 50
-      ? "Low"
-      : boundedValue < 70
-      ? "Neutral"
-      : "Confidence";
-  const labelColor =
-    boundedValue < 25
-      ? "red"
-      : boundedValue < 50
-      ? "orange"
-      : boundedValue < 75
-      ? "yellowgreen"
-      : "green";
-  const meterStyle: React.CSSProperties = {
-    position: "relative",
-    width: "250px",
-    height: "125px",
-    backgroundColor: "#2E2E2E",
-    borderRadius: "250px 250px 0 0",
-    overflow: "hidden",
-  };
-  const segmentContainerStyle: React.CSSProperties = {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: "100%",
-    display: "flex",
-    justifyContent: "space-between",
-    padding: "10px 20px",
-  };
-  const segmentStyle = (color: string): React.CSSProperties => ({
-    flex: 1,
-    height: "20px",
-    margin: "0 5px",
-    backgroundColor: color,
-    borderRadius: "10px",
-  });
-  const dialStyle: React.CSSProperties = {
-    position: "absolute",
-    bottom: "0",
-    left: "50%",
-    width: "2px",
-    height: "100px",
-    backgroundColor: "white",
-    transformOrigin: "bottom",
-    transform: `rotate(${rotation}deg)`,
-  };
-  const pointerCircleStyle: React.CSSProperties = {
-    position: "absolute",
-    bottom: "-10px",
-    left: "50%",
-    transform: "translateX(-50%)",
-    width: "20px",
-    height: "20px",
-    backgroundColor: "red",
-    borderRadius: "50%",
-  };
-  const labelStyle: React.CSSProperties = {
-    textAlign: "center",
-    marginTop: "20px",
-    color: "white",
-    fontSize: "20px",
-    fontWeight: "bold",
-  };
-  const valueStyle: React.CSSProperties = {
-    fontSize: "40px",
-    color: "white",
-  };
-  const sentimentStyle: React.CSSProperties = {
-    color: labelColor,
-  };
-
-  return (
-    <div style={{ textAlign: "center" }}>
-      <div style={meterStyle}>
-        <div style={segmentContainerStyle}>
-          <div style={segmentStyle("red")} />
-          <div style={segmentStyle("orange")} />
-          <div style={segmentStyle("yellowgreen")} />
-          <div style={segmentStyle("green")} />
-        </div>
-        <div style={dialStyle}>
-          <div style={pointerCircleStyle} />
-        </div>
-      </div>
-      <div style={labelStyle}>
-        <div style={valueStyle}>{boundedValue}</div>
-        <div style={sentimentStyle}>{sentimentLabel}</div>
-      </div>
-    </div>
-  );
-};
-*/

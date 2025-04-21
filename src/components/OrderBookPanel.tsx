@@ -1,6 +1,7 @@
 import React,{useState} from 'react';
 import MarketDepthChart from './MarketDepth';
 import OrderBookCard from './OrderBookCard';
+import HoldersChart from './HoldersChart';
 import { CandleData, RawTradeData } from '@/app/types/TradingView';
 import Modal from "react-modal";
 interface OrderData {
@@ -8,18 +9,23 @@ interface OrderData {
     time: string;
     price: number;
   }
-  
+  interface HolderDataPoint {
+    holders: number;
+    time: string;
+  }
 
   interface OrderBookPanelProps {
     holders: OrderData[]; // Replace 'any' with the appropriate type
     live_prx: RawTradeData[]; // Replace 'any' with the appropriate type
-    // Replace 'any' with the appropriate type
+    holderplot: HolderDataPoint[]// Replace 'any' with the appropriate type
   }
   const OrderBookPanel: React.FC<OrderBookPanelProps> = ({
     holders,
     live_prx,
+    holderplot
   }) => {
     const [showMarketDepthModal, setShowMarketDepthModal] = useState(false);
+    const [showHoldersModal, setShowHoldersModal] = useState(false);
     return (
         <div className="rounded-lg shadow-md p-4 w-full">
           <h2 className="text-xl font-semibold mb-4">Order Book & Market Depth</h2>
@@ -32,6 +38,7 @@ interface OrderData {
                 totalSupply={1000000000000}
               />
             </div>
+            
             {/* Market Depth Chart */}
             <div className="md:col-span-1 h-64 cursor-pointer" onClick={() => setShowMarketDepthModal(true)}>
               <MarketDepthChart
@@ -39,11 +46,18 @@ interface OrderData {
                 livePriceData={live_prx}
               />
             </div>
-    
+            {/* Market Depth Chart */}
+            <div className="md:col-span-1 h-64 cursor-pointer" onClick={() => setShowHoldersModal(true)}>
+            <HoldersChart 
+              data={holderplot} 
+              title="Token Holder Distribution" 
+              theme="dark" // or "light"
+            />
+              </div>
             
           </div>
           <Modal
-         isOpen={showMarketDepthModal}
+         isOpen={showMarketDepthModal || showHoldersModal}
          onRequestClose={() => setShowMarketDepthModal(false)}
          contentLabel="Market Depth Popup"
          style={{
@@ -61,7 +75,7 @@ interface OrderData {
              zIndex: 1000
            }
          }}
-       >
+       >{showMarketDepthModal && (
          <div className="h-full flex flex-col">
            <h2 className="text-2xl text-white mb-4">Market Depth</h2>
            <div className="flex-grow">
@@ -77,6 +91,25 @@ interface OrderData {
              Close
            </button>
          </div>
+         ) || showHoldersModal && (
+            <div className="h-full flex flex-col">
+            <h2 className="text-2xl text-white mb-4">Market Depth</h2>
+            <div className="flex-grow">
+              <HoldersChart 
+                data={holderplot} 
+                title="Token Holder Distribution" 
+                theme="dark" // or "light"
+              />
+            </div>
+            <button
+              onClick={() => setShowHoldersModal(false)}
+              className="mt-4 bg-gray-700 text-white py-2 px-4 rounded self-end"
+            >
+              Close
+            </button>
+          </div>
+         )
+         } 
        </Modal>
         </div>
          

@@ -5,7 +5,7 @@ interface OrderData {
   amount: number;
   time: string;
   price: number;
-  boughtPrice?: number; // Added bought price field
+  boughtPrice?: number;
 }
 
 interface OrderBookCardProps {
@@ -17,19 +17,45 @@ interface OrderBookCardProps {
 const OrderBookCard: React.FC<OrderBookCardProps> = ({ orders, currentPrice, totalSupply }) => {
   // Calculate price impact
   const calculatePriceImpact = (order: OrderData) => {
-    if (currentPrice === 0) return {percentageImpact: 0, marketImpact: 0};
-    
-    // Calculate impact as percentage
-    const impact = ((order.price - currentPrice) / currentPrice) * 100;
-    
-    // Calculate market cap impact (token amount / total supply)
+    if (currentPrice === 0 || order.amount <= 0) {
+      return { percentageImpact: 0, marketImpact: 0 };
+    }
+  
+    // Simulate price movement based on order amount consuming the buy orders
+    let remainingAmount = order.amount;
+    let totalCost = 0;
+    let lastPrice = currentPrice;
+  
+    // Sort buy orders from highest price to lowest
+    const sortedBuys = [...orders]
+      .filter(o => o.price <= currentPrice && o.amount > 0)
+      .sort((a, b) => b.price - a.price);
+  
+    for (let buy of sortedBuys) {
+      const volume = Math.min(remainingAmount, buy.amount);
+      totalCost += volume * buy.price;
+      remainingAmount -= volume;
+      lastPrice = buy.price;
+  
+      if (remainingAmount <= 0) break;
+    }
+  
+    // If not enough buy liquidity, simulate worst case at last known buy price
+    if (remainingAmount > 0) {
+      totalCost += remainingAmount * lastPrice;
+    }
+  
+    const averageSellPrice = totalCost / order.amount;
+    const percentageImpact = ((averageSellPrice - currentPrice) / currentPrice) * 100;
+  
     const marketImpact = (order.amount / totalSupply) * 100;
-    
+  
     return {
-      percentageImpact: impact,
-      marketImpact: marketImpact
+      percentageImpact,
+      marketImpact
     };
   };
+  
 
   // Calculate profit/loss percentage
   const calculateProfitLoss = (order: OrderData) => {
@@ -55,8 +81,8 @@ const OrderBookCard: React.FC<OrderBookCardProps> = ({ orders, currentPrice, tot
       .sort((a, b) => a.price - b.price); // Lowest sell first
     
     return {
-      buyOrders: buys.slice(0, 8), // Take top 8 orders
-      sellOrders: sells.slice(0, 8) // Take top 8 orders
+      buyOrders: buys,  // Show all buy orders
+      sellOrders: sells  // Show all sell orders
     };
   }, [orders, currentPrice]);
 
@@ -106,8 +132,8 @@ const OrderBookCard: React.FC<OrderBookCardProps> = ({ orders, currentPrice, tot
         </div>
       </div>
       <div className="p-4 pt-0">
-        {/* Column Headers */}
-        <div className="grid grid-cols-5 text-xs text-gray-400 py-1 border-b border-gray-700 mb-2">
+        {/* Column Headers - Make these sticky */}
+        <div className="grid grid-cols-5 text-xs text-gray-400 py-1 border-b border-gray-700 mb-2 sticky top-0 bg-gray-900">
           <div>Price</div>
           <div>Amount</div>
           <div>Impact</div>
@@ -115,29 +141,49 @@ const OrderBookCard: React.FC<OrderBookCardProps> = ({ orders, currentPrice, tot
           <div>Time</div>
         </div>
 
-        {/* Sell Orders (Red) */}
-        <div className="mb-4">
-          {sellOrders.map((order, idx) => {
-            const impact = calculatePriceImpact(order);
-            const profitLoss = calculateProfitLoss(order);
-            return (
-              <div key={"sell-order-" + idx} className="grid grid-cols-5 text-xs border-b border-gray-800 py-1">
-                <div className="text-red-500">${formatNumber(order.price)}</div>
-                <div className="ml-4">{formatLargeNumber(order.amount)}</div>
-                <div className={getImpactColor(impact.percentageImpact)}>
-                  {impact.percentageImpact > 0 ? '+' : ''}{impact.percentageImpact.toFixed(2)}%
+        {/* Sell Orders (Red) - Add scrollable container */}
+        <div className="mb-4 max-h-48 overflow-y-auto">
+          {sellOrders
+            // create a shallow copy and sort descending by price
+            .slice()
+            .sort((a, b) => b.price - a.price)
+            .map((order, idx) => {
+              const impact = calculatePriceImpact(order);
+              const profitLoss = calculateProfitLoss(order);
+              return (
+                <div
+                  key={`sell-order-${idx}`}
+                  className="grid grid-cols-5 text-xs border-b border-gray-800 py-1"
+                >
+                  <div className="text-red-500">
+                    ${formatNumber(order.price)}
+                  </div>
+                  <div className="ml-4">
+                    {formatLargeNumber(order.amount)}
+                  </div>
+                  <div className={getImpactColor(impact.percentageImpact)}>
+                    {impact.percentageImpact > 0 ? '+' : ''}
+                    {impact.percentageImpact.toFixed(2)}%
+                  </div>
+                  <div className={getProfitLossColor(profitLoss)}>
+                    {profitLoss !== null
+                      ? (profitLoss > 0 ? '+' : '') +
+                        profitLoss.toFixed(2) +
+                        '%'
+                      : '-'}
+                  </div>
+                  <div className="text-gray-400">
+                    {formatDate(order.time)}
+                  </div>
                 </div>
-                <div className={getProfitLossColor(profitLoss)}>
-                  {profitLoss !== null ? (profitLoss > 0 ? '+' : '') + profitLoss.toFixed(2) + '%' : '-'}
-                </div>
-                <div className="text-gray-400">{formatDate(order.time)}</div>
-              </div>
-            );
-          })}
+              );
+            })}
+
+
         </div>
 
         {/* Spread Indicator */}
-        <div className="text-xs text-center mb-4 bg-gray-800 py-1 rounded">
+        <div className="text-xs text-center mb-4 bg-gray-800 py-1 rounded sticky z-0">
           {sellOrders.length > 0 && buyOrders.length > 0 ? (
             <>
               Spread: ${formatNumber(sellOrders[0].price - buyOrders[0].price)} 
@@ -148,13 +194,13 @@ const OrderBookCard: React.FC<OrderBookCardProps> = ({ orders, currentPrice, tot
           )}
         </div>
 
-        {/* Buy Orders (Green) */}
-        <div>
+        {/* Buy Orders (Green) - Add scrollable container */}
+        <div className="max-h-48 overflow-y-auto">
           {buyOrders.map((order, idx) => {
             const impact = calculatePriceImpact(order);
             const profitLoss = calculateProfitLoss(order);
             return (
-              <div key={"buy-order-" + idx} className="grid grid-cols-5 text-xs border-b border-gray-800 py-1">
+              <div key={`buy-order-${idx}`} className="grid grid-cols-5 text-xs border-b border-gray-800 py-1">
                 <div className="text-green-500">${formatNumber(order.price)}</div>
                 <div className="ml-4">{formatLargeNumber(order.amount)}</div>
                 <div className={getImpactColor(impact.percentageImpact)}>

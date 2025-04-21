@@ -42,6 +42,7 @@ export default function Home() {
   const [tweetViewsPerMinute, setTweetsViewsPerMinuteData] = useState<CompImpression[]>([]);
   const [emojiRawData, setEmojiRawData] = useState<{ em_time: number, emoji: string }[]>([]);
   const [holderRawData, setHoldersRawData] = useState<{ amount: number, price: number,time:string }[]>([]);
+  const [holderData, setHoldersData] = useState<{ holders: number; time: string }[]>([]);
   const [usernames, setUsernames] = useState<string[]>([]);
   const [tweets, setTweets] = useState<string[]>([]);
   const [likes, setLikes] = useState<string[]>([]);
@@ -610,8 +611,63 @@ export default function Home() {
     };
     
      fetchHolersData()
+     const fetchHoldersPlot = async () => {
+      try {
+        const hostname = await fetchHostnameFromConfig();
+        
+        // Use the provided URL pattern but with the correct path
+        const response = await fetch(`http://${hostname}:3300/api/holder-snapshots?address=${address}`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        
+        const jsonData = await response.json();
+        
+        // Aggregate data by price and time (converted to an ISO string with seconds and milliseconds reset)
+        const holderData: { [key: string]: { holders: number; time: string } } = {};
+        
+        jsonData.forEach((entry: any) => {
+          // Extract the holders count
+          const holders = parseInt(entry.holders);
+          
+          // Round the time to the nearest minute (seconds & milliseconds zeroed)
+          const timeNumber = new Date(entry.time).setSeconds(0, 0);
+          
+          // Convert the time back to a string (ISO format)
+          const formattedTime = new Date(timeNumber).toISOString();
+          
+          // Use the formatted time as the key since we're tracking holders over time
+          const key = formattedTime;
+          
+          // For holder snapshots, we're likely interested in the latest count for each minute
+          // We could also sum or average if there are multiple entries per minute
+          holderData[key] = { holders, time: formattedTime };
+        });
+        
+        // Convert aggregated object to an array of objects with holders count and time
+        const holdersArray = Object.values(holderData);
+        
+        // Sort by time to ensure chronological order
+        holdersArray.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+        
+        // Only update state if the new data differs from the current state
+        setHoldersData((prev) => {
+          if (JSON.stringify(prev) !== JSON.stringify(holdersArray)) {
+            return holdersArray;
+          }
+          return prev;
+        });
+        
+        return holdersArray;
+      } catch (error) {
+        console.error('Error fetching holders data:', error);
+        return [];
+      }
+    };
+    fetchHoldersPlot()
     const interval = setInterval(() => {
-      fetchData();fetchHolersData()
+      fetchData();fetchHolersData();fetchHoldersPlot()
     }, 60000); // Fetch every 60 seconds
 
     return () => clearInterval(interval);
@@ -637,9 +693,9 @@ export default function Home() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-grow p-4 flex flex-col lg:flex-row">
+      <main className="flex flex-col lg:flex-row items-stretch overflow-hidden lg:h-[90vh]">
         {/* Left Section */}
-        <section className="w-full lg:w-2/3 flex flex-col">
+        <section className="w-full lg:w-3/5 flex flex-col overflow-auto">
           <div>
             <h1>Blockchain Data on TradingView Charts</h1>
             {/*totalchartData.length > 0 ? <TVChart data={totalchartData} /> : <p>Loading...</p>*/}
@@ -664,21 +720,23 @@ export default function Home() {
           {/* <Chart name={metadata?.name} symbol={metadata?.symbol} />*/}
           {/* Use flex-grow to push TopTweets to the bottom */}
          
-          <div className="flex-grow"></div>
-          <TopTweets username={usernames} tweets_={tweets} likes={likes} viewscount={viewscount} timestamp={time} profile={profile} />
+          <div className="">
+            <TopTweets username={usernames} tweets_={tweets} likes={likes} viewscount={viewscount} timestamp={time} profile={profile} />
+          </div>
         </section>
           {/* Right Section (Sidebar + OrderBook) */}
         <div className="w-full flex flex-col lg:flex-row">
           {/* Order Book */}
-          <div className="lg:w-1/2 p-4 border-l border-gray-700">
+          <div className="lg:w-1/2 p-4 border-l border-gray-700 overflow-auto">
             
             <OrderBookPanel 
               holders={holderRawData}
               live_prx={livePrice}
+              holderplot={holderData}
             />
           </div>  
           {/* Right Section (Sidebar) */}
-          <aside className="w-full lg:w-1/2 p-4 border-l border-gray-700">
+          <aside className="w-full lg:w-1/2 p-4 border-l border-gray-700 overflow-auto">
             <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} tweetPerMinut={tweetPerMinute} impression={impressionsData} engagement={engaments} tweetViews={tweetViewsPerMinute} sentimentPlot={sentimentTimeSeries} tweetsWithAddress={tweetsWithAddress} holders={holderRawData} live_prx={livePrice}/>
           </aside>
           </div>
