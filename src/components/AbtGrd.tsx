@@ -1,35 +1,56 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import Card from "./Card";
-interface Impression {
-    name: string;
-    value: number;
-}
-interface AboutToGraduateSectionProps {
-    addresses: any[];
-    othermetadata: any[]
-    usrname: any[][]
-    tweets: any[][]
-    impressionsData: Impression[][]
-}
-const AboutToGraduateSection: React.FC<AboutToGraduateSectionProps> = ({ addresses, othermetadata, usrname, tweets, impressionsData }) => {
-    const cards = [
-        { title: "MC $67.7k", subtitle: "9.6k" },
-        { title: "MC $65.1k", subtitle: "15.2k" },
-        { title: "MC $59.5k", subtitle: "11k" },
-        { title: "MC $57.8k", subtitle: "13.7k" },
-        { title: "MC $53.3k", subtitle: "5.1k" },
-    ];
 
-    return (
-        <section className="mb-6">
-            <h2 className="text-sm text-gray-400 mb-2">Trending Token</h2>
-            <div className="flex overflow-x-auto space-x-4">
-                {addresses.map((addressObj, index) => (
-                    <Card key={index} imageSrc={othermetadata[index]?.image} tkName={othermetadata[index]?.name} tkSymbl={othermetadata[index]?.symbol} usernames={usrname[index]} tweets={tweets[index]} />
-                ))}
-            </div>
-        </section>
-    );
+interface Impression {
+  name: string;
+  value: number;
+}
+
+interface AboutToGraduateSectionProps {
+  addresses: any[];
+  othermetadata: { image: string; name: string; symbol: string }[];
+  usrname: string[][];
+  tweets: any[][];
+  impressionsData: Impression[][];
+}
+
+const AboutToGraduateSection: React.FC<AboutToGraduateSectionProps> = ({
+  addresses,
+  othermetadata,
+  usrname,
+  tweets,
+  impressionsData,
+}) => {
+  // 1. Build a unified data array
+  const cardsData = addresses.map((address, idx) => ({
+    address,
+    metadata: othermetadata[idx] || {},
+    usernames: usrname[idx] || [],
+    tweets: tweets[idx] || [],
+    impressions: impressionsData[idx] || [],
+    tweetCount: (tweets[idx] || []).length,
+  }));
+
+  // 2. Sort descending by tweetCount
+  cardsData.sort((a, b) => b.tweetCount - a.tweetCount);
+
+  return (
+    <section className="mb-6">
+      <h2 className="text-sm text-gray-400 mb-2">Trending Token</h2>
+      <div className="flex overflow-x-auto space-x-4">
+        {cardsData.map((card, index) => (
+          <Card
+            key={card.address + index}
+            imageSrc={card.metadata.image}
+            tkName={card.metadata.name}
+            tkSymbl={card.metadata.symbol}
+            address={card.address.address}
+            tweets={card.tweets}
+          />
+        ))}
+      </div>
+    </section>
+  );
 };
 
 export default AboutToGraduateSection;

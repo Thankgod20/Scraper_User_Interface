@@ -15,10 +15,17 @@ import TVChartContainer from '@/components/AdvChart';
 import Script from 'next/script';
 import { CandleData, RawTradeData } from '@/app/types/TradingView';
 import Sentiment from 'sentiment';
+import OrderBookCard from '@/components/OrderBookCard';
+import OrderBookPanel from '@/components/OrderBookPanel';
 //import AdvChart from '@/components/AdvChart';
 interface Impression {
   name: string;
   value: number;
+}
+interface CompImpression {
+  name: string;
+  value: number;
+  preval: number;
 }
 const ALPHA = 0.01; // baseline pump magnitude (e.g., 1%)
 const BETA = 0.05;  // sensitivity coefficient
@@ -32,9 +39,9 @@ export default function Home() {
   const [impressionsData, setImpressionsData] = useState<Impression[]>([]);
   const [engaments, setEngamentData] = useState<Impression[]>([]);
   const [tweetPerMinute, setTweetsPerMinuteData] = useState<Impression[]>([]);
-  const [tweetViewsPerMinute, setTweetsViewsPerMinuteData] = useState<Impression[]>([]);
+  const [tweetViewsPerMinute, setTweetsViewsPerMinuteData] = useState<CompImpression[]>([]);
   const [emojiRawData, setEmojiRawData] = useState<{ em_time: number, emoji: string }[]>([]);
-  const [holderRawData, setHoldersRawData] = useState<{ amount: number, price: number }[]>([]);
+  const [holderRawData, setHoldersRawData] = useState<{ amount: number, price: number,time:string }[]>([]);
   const [usernames, setUsernames] = useState<string[]>([]);
   const [tweets, setTweets] = useState<string[]>([]);
   const [likes, setLikes] = useState<string[]>([]);
@@ -370,7 +377,7 @@ export default function Home() {
       const viewCounts: { [key: string]: number } = {};
       const engagementCounts: { [key: string]: number } = {};
       const tweetCounts: { [key: string]: number } = {};
-      const tweetViews: { [key: string]: number } = {};
+      const tweetViews: { [key: string]: { last: number; prev: number } } = {};//const tweetViews: { [key: string]: number } = {};
       const emojiData: { [key: number]: string } = {};
       const extractedUsernames: string[] = [];
       const extractedTweets: string[] = [];
@@ -425,7 +432,7 @@ export default function Home() {
         extractedView.push(views)
         extractedLikes.push(likes)
         extractedTimes.push(timestamp)
-        //console.log("Time Stamp",timestamp)
+        console.log("Time Stamp",timestamp)
         let minuteKey;
         if (timestamp) {
             try {
@@ -479,11 +486,15 @@ export default function Home() {
         }
         //console.log("views[time.length-1]",views[views.length-1])
         const view = isNaN(parseViewsCount(views[views.length-1])) ? 0 : parseViewsCount(views[views.length-1]);
+        let viewPrev = 0//isNaN(parseViewsCount(views[views.length-2])) ? 0 : parseViewsCount(views[views.length-2]);
+        if (views.length>1) {
+          viewPrev = isNaN(parseViewsCount(views[views.length-2])) ? 0 : parseViewsCount(views[views.length-2]);
+        }
         if (tweetViews[minuteKey]) {
-          
-          tweetViews[minuteKey] += view; // Increment the count for tweets in this minute
+          tweetViews[minuteKey].last += view;
+          tweetViews[minuteKey].prev += viewPrev;
         } else {
-          tweetViews[minuteKey] = view; // Initialize with 1 tweet for this minute
+          tweetViews[minuteKey] = { last: view, prev: viewPrev };
         }
         if (!emojiData[emojiTimeStamp]) {
           const sentiment = parseViewsCount(views[views.length - 1])
@@ -500,7 +511,7 @@ export default function Home() {
           }
         }
       });
-
+      console.log("Views tweetsPerViewsMinuteArray ",tweetViews)
       // Convert the viewCounts object into an array
       const impressionsArray = Object.entries(viewCounts).map(([name, value]) => ({
         name,
@@ -519,10 +530,20 @@ export default function Home() {
         em_time: parseInt(time, 10),
         emoji,
       })).sort((a, b) => a.em_time - b.em_time);
+      /*
       const tweetsPerViewsMinuteArray = Object.entries(tweetViews).map(([name, value]) => ({
         name,
         value
-      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
+      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());*/
+      const tweetsPerViewsMinuteArray = Object.entries(tweetViews)
+      .map(([name, data]) => ({
+      name,
+      value: data.last,
+      preval: data.prev
+    }))
+    .sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
+    
+  setTweetsViewsPerMinuteData(tweetsPerViewsMinuteArray);
       //console.log("emojiArray", emojiArray)
       //setEmojiRawData(emojiArray)
       setEmojiRawData(prevData => {
@@ -554,24 +575,27 @@ export default function Home() {
         const response = await fetch(`http://${hostname}:3300/fetch-holders?search=${address}`);
         const jsonData = await response.json();
     
-        // Aggregate data by price
-        const holderData: { [key: number]: number } = {};
+        // Aggregate data by price and time (converted to an ISO string with seconds and milliseconds reset)
+        const holderData: { [key: string]: { price: number; amount: number; time: string } } = {};
         jsonData.forEach((entry: any) => {
           const price = parseFloat(entry.price);
           const amount = parseFloat(entry.amount);
-          // If this price already exists, add to the current amount; otherwise, create a new entry.
-          if (holderData[price] !== undefined) {
-            holderData[price] += amount;
+          // Round the time to the nearest minute (seconds & milliseconds zeroed)
+          const timeNumber = new Date(entry.time).setSeconds(0, 0);
+          // Convert the time back to a string (ISO format)
+          const formattedTime = new Date(timeNumber).toISOString();
+          // Create a composite key using price and the formatted time
+          const key = `${price}_${formattedTime}`;
+    
+          if (holderData[key] !== undefined) {
+            holderData[key].amount += amount;
           } else {
-            holderData[price] = amount;
+            holderData[key] = { price, amount, time: formattedTime };
           }
         });
     
-        // Convert aggregated object to an array of objects with numerical price and amount.
-        const holdersArray = Object.entries(holderData).map(([price, amount]) => ({
-          price: parseFloat(price),
-          amount,
-        }));
+        // Convert aggregated object to an array of objects with numerical price, amount, and time string.
+        const holdersArray = Object.values(holderData);
     
         // Only update state if the new data differs from the current state.
         setHoldersRawData((prev) => {
@@ -584,6 +608,7 @@ export default function Home() {
         console.error('Error fetching holders data:', error);
       }
     };
+    
      fetchHolersData()
     const interval = setInterval(() => {
       fetchData();fetchHolersData()
@@ -642,12 +667,23 @@ export default function Home() {
           <div className="flex-grow"></div>
           <TopTweets username={usernames} tweets_={tweets} likes={likes} viewscount={viewscount} timestamp={time} profile={profile} />
         </section>
-
-        {/* Right Section (Sidebar) */}
-        <aside className="w-full lg:w-1/3 p-4 border-l border-gray-700">
-          <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} tweetPerMinut={tweetPerMinute} impression={impressionsData} engagement={engaments} tweetViews={tweetViewsPerMinute} sentimentPlot={sentimentTimeSeries} tweetsWithAddress={tweetsWithAddress} holders={holderRawData} live_prx={livePrice}/>
-        </aside>
-      </main>
-    </div>
+          {/* Right Section (Sidebar + OrderBook) */}
+        <div className="w-full flex flex-col lg:flex-row">
+          {/* Order Book */}
+          <div className="lg:w-1/2 p-4 border-l border-gray-700">
+            
+            <OrderBookPanel 
+              holders={holderRawData}
+              live_prx={livePrice}
+            />
+          </div>  
+          {/* Right Section (Sidebar) */}
+          <aside className="w-full lg:w-1/2 p-4 border-l border-gray-700">
+            <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} tweetPerMinut={tweetPerMinute} impression={impressionsData} engagement={engaments} tweetViews={tweetViewsPerMinute} sentimentPlot={sentimentTimeSeries} tweetsWithAddress={tweetsWithAddress} holders={holderRawData} live_prx={livePrice}/>
+          </aside>
+          </div>
+        </main>
+      </div>
+    
   );
 }

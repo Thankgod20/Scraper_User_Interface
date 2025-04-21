@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 
-const Card = ({ imageSrc, tkName, tkSymbl, usernames, tweets }: { imageSrc: any, tkName: any, tkSymbl: any, usernames: any, tweets: any }) => {
+const Card = ({ imageSrc, tkName, tkSymbl, address, tweets }: { imageSrc: any, tkName: any, tkSymbl: any, address: any, tweets: any }) => {
 
     return (
         <div className="min-w-[120px] bg-gray-800 p-2 rounded-lg shadow-md">
