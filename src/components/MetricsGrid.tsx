@@ -634,7 +634,10 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
     tweetsWithAddress,
     5
   );
-
+  const totalTweetsWithAddress = tweetsWithAddressCount.reduce(
+    (sum, { value }) => sum + value,
+    0
+  );
   console.log("Tweet views",tweetViews)
   const tweetsWithAddressFrequency = calculateTweetFrequencyTrendPercentage(tweetsWithAddressCount, 10, 5, 10);
   const currentTweetWiAddFrequencyTrend = tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1]?.value || 0;
@@ -755,7 +758,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
         <MetricCard
           title="Tweets w/ Address (5min Count)"
           value={
-            tweetsWithAddressCount.length.toString()
+            totalTweetsWithAddress.toString()
           }
           percentageChange=""
           subText="Number of tweets with address per 5 minutes"
@@ -829,7 +832,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
         <h1>Hype Meter</h1>
         <SentimentMeter score={Math.round(calculateSentimentScore(currentTweetFrequencyTrend, currentSentimentTrend,avgLstView,Number(totalTweets) ))} />
         <h1>Hype Meter For Address</h1>
-        <SentimentMeter score={Math.round(calculateSentimentScore(currentTweetWiAddFrequencyTrend, currentSentimentTrend,tweetwithAddAvgViewsS,tweetsWithAddressCount.length ))} />
+        <SentimentMeter score={Math.round(calculateSentimentScore(currentTweetWiAddFrequencyTrend, currentSentimentTrend,tweetwithAddAvgViewsS,totalTweetsWithAddress ))} />
       </div>
       {/* Modal for Market Depth Chart Popup */}
       <Modal
