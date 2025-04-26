@@ -280,7 +280,7 @@ function calculateSentimentTrend(
  * @returns An array of objects with the timestamp and normalized tweet frequency percentage.
  
 */
-
+/*
 function calculateTweetFrequencyTrendPercentage(
   data: Impression[],
   windowMinutes: number = 5,
@@ -288,7 +288,7 @@ function calculateTweetFrequencyTrendPercentage(
   totalTweetsThreshold: number = 20
 ): Impression[] {
   if (data.length === 0) return [];
-
+  
   // Sort data by timestamp ascending.
   const sortedData = [...data].sort(
     (a, b) => new Date(a.name).getTime() - new Date(b.name).getTime()
@@ -303,6 +303,7 @@ function calculateTweetFrequencyTrendPercentage(
       const time = new Date(p.name).getTime();
       return time >= windowStart && time <= currentTime;
     }).length;
+  
     return { name: point.name, value: frequency };
   });
   
@@ -327,8 +328,60 @@ function calculateTweetFrequencyTrendPercentage(
 
   return normalizedTrend;
 }
+*/
+function calculateTweetFrequencyTrendPercentage(
+  data: Impression[],
+  windowMinutes: number = 5,
+  smoothWindow: number = 3,
+  totalTweetsThreshold: number = 20
+): Impression[] {
+  if (data.length === 0) return [];
 
+  // Sort data by timestamp ascending.
+  const sortedData = [...data].sort(
+    (a, b) => new Date(a.name).getTime() - new Date(b.name).getTime()
+  );
 
+  // Compute raw frequency values using a sliding window.
+  const rawTrend: Impression[] = sortedData.map((point, index) => {
+    const currentTime = new Date(point.name).getTime();
+    const windowStart = currentTime - windowMinutes * 60000;
+
+    // Sum tweet counts within the window.
+    let frequency = 0;
+    for (let i = index; i >= 0; i--) {
+      const time = new Date(sortedData[i].name).getTime();
+      if (time >= windowStart) {
+        frequency += sortedData[i].value;
+      } else {
+        break;
+      }
+    }
+
+    return { name: point.name, value: frequency };
+  });
+
+  // Apply a simple moving average to smooth the raw frequency data.
+  function movingAverage(values: Impression[], windowSize: number): Impression[] {
+    return values.map((point, i, arr) => {
+      const start = Math.max(0, i - windowSize + 1);
+      const windowSlice = arr.slice(start, i + 1);
+      const avg = windowSlice.reduce((sum, p) => sum + p.value, 0) / windowSlice.length;
+      return { name: point.name, value: avg };
+    });
+  }
+
+  const smoothedTrend = movingAverage(rawTrend, smoothWindow);
+
+  // Normalize each smoothed frequency value to a percentage.
+  // The maximum expected tweets in the window is defined by totalTweetsThreshold.
+  const normalizedTrend = smoothedTrend.map(point => ({
+    name: point.name,
+    value: Math.min((point.value / totalTweetsThreshold) * 100, 100)
+  }));
+
+  return normalizedTrend;
+}
 function calculateSentimentVolatility(impressions: Impression[]): number {
   if (impressions.length < 2) return 0;
   const maxImpression = Math.max(...impressions.map(imp => imp.value));
@@ -447,6 +500,28 @@ function calculateCumulativePercentage(impressions: Impression[]): Impression[] 
     value: index === 0 ? 0 : (imp.value - initialValue) / initialValue
   }));
 }
+function calculateImpressionPercentage(impressions: Impression[], windowSize: number = 3): Impression[] {
+  if (impressions.length === 0) return [];
+
+  const percentageChanges: number[] = impressions.map((imp, index) => {
+    if (index === 0) return 0;
+    const prevValue = impressions[index - 1].value;
+    return prevValue === 0 ? 0 : ((imp.value - prevValue) / prevValue)*100;
+  });
+
+  const smoothedChanges: number[] = percentageChanges.map((_, index) => {
+    const start = Math.max(0, index - windowSize + 1);
+    const window = percentageChanges.slice(start, index + 1);
+    const average = window.reduce((sum, val) => sum + val, 0) / window.length;
+    return average;
+  });
+
+  return impressions.map((imp, index) => ({
+    name: imp.name,
+    value: smoothedChanges[index],
+  }));
+}
+
 function categorizeTweetsByIntervalC(data: CompImpression[], minute: number): CompImpression[] {
   // Helper function to round a date down to the nearest interval (in minutes)
   function roundToNearestMinutes(date: Date): Date {
@@ -612,7 +687,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   //const cummulatedSumFv = calculateCumulativePercentage(tweetPerFVmints);
   const averagePercentage = calculateAveragePercentage(tweetPerMinut);
   //const cummulatedSum = calculateCumulativePercentage(tweetPerMinut);
-  const cumuImpression = calculateCumulativePercentage(impression);
+  const cumuImpression = calculateImpressionPercentage(impression);
   //console.log("Impression",impression)
   const cumuAvrage = calculateAveragePercentage(impression);
   //const cumuEngage = calculateCumulativePercentage(engagement);
@@ -622,7 +697,8 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   const sentimentVolatility = calculateSentimentVolatility(impression);
   const weightedSentiment = calculateSentimentWeightedMetrics(impression, engagement);
   const sentimentPeaks = detectSentimentPeaks(impression);
-  const tweetFrequencyTrend = calculateTweetFrequencyTrendPercentage(tweetPerMinut, 10, 5,10);
+  console.log("Tweet Rack",tweetPerMinut)
+  const tweetFrequencyTrend = calculateTweetFrequencyTrendPercentage(tweetPerMinut, 5, 9,50);
   const sentimentTrend = calculateSentimentTrend(sentimentPlot, 30);
   const currentSentimentTrend = sentimentTrend[sentimentTrend.length - 1]?.aggregatedSentiment || 0;
   const currentTweetFrequencyTrend = tweetFrequencyTrend[tweetFrequencyTrend.length - 1]?.value || 0;
@@ -638,8 +714,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
     (sum, { value }) => sum + value,
     0
   );
-  console.log("Tweet views",tweetViews)
-  const tweetsWithAddressFrequency = calculateTweetFrequencyTrendPercentage(tweetsWithAddressCount, 10, 5, 10);
+  const tweetsWithAddressFrequency = calculateTweetFrequencyTrendPercentage(tweetsWithAddressCount, 5, 5, 40);
   const currentTweetWiAddFrequencyTrend = tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1]?.value || 0;
   const tweetwithAddAvgViews = calculateAverageViewsPerTweet(tweetsWithAddressViews, tweetsWithAddressCount);
   const tweetwithAddAvgViewsS = calculateAverageViewsPerTweet(tweetsWithAddressViews.slice(-15), tweetsWithAddressCount.slice(-15));

@@ -11,15 +11,18 @@ import {
 } from "recharts";
 import { useMetadata } from "@/context/MetadataContext";
 import { useRouter } from 'next/navigation';
+
 interface Impression {
   name: string;
   value: number;
 }
+
 interface CompImpression {
-    name: string;
-    value: number;
-    preval: number;
-  }
+  name: string;
+  value: number;
+  preval: number;
+}
+
 interface UITableProps {
   addresses: { address: string }[];
   othermetadata: { 
@@ -38,12 +41,13 @@ interface UITableProps {
   tweets: string[][];
   impressionsData: CompImpression[][];
   onRowClick?: (index: number) => void;
+  itemsPerPage?: number; // Number of items to display per page
 }
 
 // Component for displaying the Fear/Greed dial meter
 const FearGreedDial = ({ score }: { score: number }) => {
   if (Number.isNaN(score)) {
-    score= 0;      // Gray when score is not a valid number
+    score = 0;      // Gray when score is not a valid number
   }
   // Determine color based on score
   const getColor = (score: number) => {
@@ -131,13 +135,19 @@ const UITable = ({
   tweetsPerMin,
   tweets, 
   impressionsData,
-  onRowClick = (index) => console.log(`Row ${index} clicked`)
+  onRowClick = (index) => console.log(`Row ${index} clicked`),
+  itemsPerPage = 5 // Default to 5 items per page
 }: UITableProps) => {
-    const router = useRouter();
+  const router = useRouter();
+  const { setMetadata } = useMetadata();
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
-    const { setMetadata } = useMetadata();
-  // Extract and prepare data for the table
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
 
+  // Extract and prepare data for the table
   const tableData = useMemo(() => {
     return addresses.map((address, index) => {
       const metadata = othermetadata[index] || {};
@@ -145,13 +155,14 @@ const UITable = ({
       const tweetTexts = tweets[index] || [];
       const impressions = impressionsData[index] || [];
       const tweetperMin = tweetsPerMin[index] || []
-      //console.log("Impressiond ",impressions)
+      
       // Calculate number of tweets
       const numberOfTweets = tweetTexts.length;
       
       // Use total views from all impressions for a single view count
       const totalViews = impressions.reduce((sum, imp) => sum + imp.value, 0);
       const averageViews = totalViews/impressions.length
+      
       // Calculate tweet frequency
       const tweetFrequency = calculateTweetFrequencyTrendPercentage(
         tweetperMin,
@@ -159,7 +170,7 @@ const UITable = ({
         5,
         10
       );
-      //console.log("Tweet frq",tweetFrequency)
+      
       const avgTweetFrequency = tweetFrequency.length > 0
         ? tweetFrequency[tweetFrequency.length-1].value
         : 0;
@@ -190,6 +201,39 @@ const UITable = ({
     });
   }, [addresses, othermetadata, usrname, tweets, impressionsData]);
 
+  // Get current items for pagination
+  const displayedItems = useMemo(() => {
+    const lastIndex = currentPage * itemsPerPage;
+    return tableData.slice(0, lastIndex);
+  }, [tableData, currentPage, itemsPerPage]);
+
+  // Function to handle loading more items
+  const loadMore = () => {
+    if (loading) return;
+    
+    setLoading(true);
+    
+    // Simulate loading delay
+    setTimeout(() => {
+      if (currentPage * itemsPerPage >= tableData.length) {
+        setHasMore(false);
+      } else {
+        setCurrentPage(currentPage + 1);
+      }
+      setLoading(false);
+    }, 500);
+  };
+
+  // Implement infinite scroll
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
+    
+    // When user scrolls to bottom, load more items
+    if (scrollHeight - scrollTop <= clientHeight * 1.5 && hasMore && !loading) {
+      loadMore();
+    }
+  };
+
   // Utility functions from the provided code
   function calculateSentimentMomentum(impressions: Impression[]): number {
     if (!impressions || impressions.length < 2) return 0;
@@ -219,7 +263,7 @@ const UITable = ({
     const sortedData = [...data].sort(
       (a, b) => new Date(a.name).getTime() - new Date(b.name).getTime()
     );
-    //console.log("rawTrend",sortedData)
+    
     // Compute raw frequency values using a sliding window.
     const rawTrend: Impression[] = sortedData.map(point => {
       const currentTime = new Date(point.name).getTime();
@@ -257,13 +301,12 @@ const UITable = ({
   function calculateSentimentScore(
     tweetFrequencyTrend: number, // expected as percentage (0-100)
     sentimentTrend: number,      // expected as percentage (0-100)
-    views: number ,               // raw view count
+    views: number,              // raw view count
     numberTweet: number
   ): number {
-    //console.log(" tweetFrequencyTrend ",tweetFrequencyTrend,sentimentTrend,views,numberTweet)
     // Normalize tweet frequency and sentiment trend to a maximum of 100.
     const normalizedTweetFrequency = Math.min(tweetFrequencyTrend, 100);
-    const normalizedSentimentTrend = sentimentTrend*20 >= 100 ? 100 : sentimentTrend*20;//Math.min(sentimentTrend*10, 100);
+    const normalizedSentimentTrend = sentimentTrend*20 >= 100 ? 100 : sentimentTrend*20;
     
     // Normalize views: if views >= 1000, treat as 100; otherwise, scale linearly.
     const normalizedViews = views >= 1000 ? 100 : (views / 1000) * 100;
@@ -285,7 +328,7 @@ const UITable = ({
     return Math.min(sentimentScore, 100);
   }
 
-  const handleRowClick = (address: string, metadata: any,index: number) => {
+  const handleRowClick = (address: string, metadata: any, index: number) => {
     setSelectedRow(index);
     onRowClick(index);
     setMetadata(metadata);
@@ -293,74 +336,98 @@ const UITable = ({
   };
 
   return (
-    <div className="overflow-x-auto mb-8">
+    <div className="mb-8">
       <h2 className="text-xl font-bold mb-4">Token Analytics</h2>
-      <table className="min-w-full bg-gray-800 text-white rounded-lg overflow-hidden">
-        <thead className="bg-gray-700">
-          <tr>
-            <th className="px-4 py-3 text-left">Token</th>
-            <th className="px-4 py-3 text-left">Number of Tweets</th>
-            <th className="px-4 py-3 text-left">Views</th>
-            <th className="px-4 py-3 text-left">Tweet Frequency</th>
-            <th className="px-4 py-3 text-left">Hype Meter</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tableData.map((item, index) => (
-            <tr 
-              key={index} 
-              className={`${index % 2 === 0 ? "bg-gray-800" : "bg-gray-750"} 
-                ${selectedRow === index ? "bg-indigo-900" : ""} 
-                cursor-pointer hover:bg-gray-700 transition-colors`}
-              onClick={() => handleRowClick(item.address,item.metadata,index)}
-            >
-              <td className="px-4 py-3">
-                <div className="flex items-center">
-                  {item.image && (
-                    <img 
-                      src={item.image} 
-                      alt={item.name} 
-                      className="w-8 h-8 rounded-full mr-3" 
-                    />
-                  )}
-                  <div>
-                    <div className="font-medium"><a href={`/coin/${item.address}`}>{item.name || "Unknown"}</a></div>
-                    <div className="text-gray-400 text-sm">{item.symbol}</div>
-                  </div>
-                </div>
-              </td>
-              
-              <td className="px-4 py-3">
-                <div className="font-medium">{item.numberOfTweets}</div>
-              </td>
-              
-              <td className="px-4 py-3">
-                <div className="h-20 w-44">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarGraph data={item.impressions}  />
-                  </ResponsiveContainer>
-                  <div className="text-center text-sm font-medium">
-                    {formatNumber(Number(item.averageViews.toFixed(2)))}
-                  </div>
-                </div>
-              </td>
-              
-              <td className="px-4 py-3">
-                <div className="font-medium">{item.tweetFrequency.toFixed(1)}%</div>
-                <div className="text-gray-400 text-sm">
-                  {item.tweetFrequency < 25 ? "Low" : 
-                   item.tweetFrequency < 50 ? "Moderate" : 
-                   item.tweetFrequency < 75 ? "High" : "Very High"}
-                </div>
-              </td>
-              
-              <td className="px-4 py-3 flex justify-center items-center">
-                <FearGreedDial score={item.fearGreedIndex} />
-              </td>
+      
+      <div 
+        className="overflow-x-auto max-h-96 overflow-y-auto" 
+        onScroll={handleScroll}
+      >
+        <table className="min-w-full bg-gray-800 text-white rounded-lg overflow-hidden">
+          <thead className="bg-gray-700 sticky top-0 z-10">
+            <tr>
+              <th className="px-4 py-3 text-left">Token</th>
+              <th className="px-4 py-3 text-left">Number of Tweets</th>
+              <th className="px-4 py-3 text-left">Views</th>
+              <th className="px-4 py-3 text-left">Tweet Frequency</th>
+              <th className="px-4 py-3 text-left">Hype Meter</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {displayedItems.map((item, index) => (
+              <tr 
+                key={index} 
+                className={`${index % 2 === 0 ? "bg-gray-800" : "bg-gray-750"} 
+                  ${selectedRow === index ? "bg-indigo-900" : ""} 
+                  cursor-pointer hover:bg-gray-700 transition-colors`}
+                onClick={() => handleRowClick(item.address, item.metadata, index)}
+              >
+                <td className="px-4 py-3">
+                  <div className="flex items-center">
+                    {item.image && (
+                      <img 
+                        src={item.image} 
+                        alt={item.name} 
+                        className="w-8 h-8 rounded-full mr-3" 
+                      />
+                    )}
+                    <div>
+                      <div className="font-medium"><a href={`/coin/${item.address}`}>{item.name || "Unknown"}</a></div>
+                      <div className="text-gray-400 text-sm">{item.symbol}</div>
+                    </div>
+                  </div>
+                </td>
+                
+                <td className="px-4 py-3">
+                  <div className="font-medium">{item.numberOfTweets}</div>
+                </td>
+                
+                <td className="px-4 py-3">
+                  <div className="h-20 w-44">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarGraph data={item.impressions} />
+                    </ResponsiveContainer>
+                    <div className="text-center text-sm font-medium">
+                      {formatNumber(Number(item.averageViews.toFixed(2)))}
+                    </div>
+                  </div>
+                </td>
+                
+                <td className="px-4 py-3">
+                  <div className="font-medium">{item.tweetFrequency.toFixed(1)}%</div>
+                  <div className="text-gray-400 text-sm">
+                    {item.tweetFrequency < 25 ? "Low" : 
+                     item.tweetFrequency < 50 ? "Moderate" : 
+                     item.tweetFrequency < 75 ? "High" : "Very High"}
+                  </div>
+                </td>
+                
+                <td className="px-4 py-3 flex justify-center items-center">
+                  <FearGreedDial score={item.fearGreedIndex} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        
+        {loading && (
+          <div className="flex justify-center py-4 bg-gray-800 text-white">
+            <div className="animate-pulse">Loading more items...</div>
+          </div>
+        )}
+        
+        {!hasMore && tableData.length > 0 && (
+          <div className="text-center py-4 bg-gray-800 text-gray-400">
+            All items loaded
+          </div>
+        )}
+        
+        {tableData.length === 0 && (
+          <div className="text-center py-8 bg-gray-800 text-white">
+            No data available
+          </div>
+        )}
+      </div>
     </div>
   );
 };

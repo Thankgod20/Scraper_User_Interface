@@ -433,7 +433,7 @@ export default function Home() {
         extractedView.push(views)
         extractedLikes.push(likes)
         extractedTimes.push(timestamp)
-        console.log("Time Stamp",timestamp)
+        
         let minuteKey;
         if (timestamp) {
             try {
@@ -512,7 +512,7 @@ export default function Home() {
           }
         }
       });
-      console.log("Views tweetsPerViewsMinuteArray ",tweetViews)
+      //console.log("Views tweetsPerViewsMinuteArray ",tweetViews)
       // Convert the viewCounts object into an array
       const impressionsArray = Object.entries(viewCounts).map(([name, value]) => ({
         name,
