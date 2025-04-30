@@ -1,703 +1,1477 @@
 import React, { JSX, useState, useEffect } from 'react';
 import LineGraph from "./LineGraph";
+import LineGraphTimeS from "./LineGraphTimeS"
 import DLineGraph from './DetailedLineGraph';
 import { NumberFormatter } from '@/app/utils/largeNumber';
 import { QRCodeCanvas } from "qrcode.react"; // Ensure you install this package: npm install qrcode.react
+import { CandleData, RawTradeData } from '@/app/types/TradingView';
 import Modal from "react-modal";
 import ReactDOM from "react-dom";
+import LineGraphTimeD from "./LineGraphTimeD"
+import BarGraph from './BarChar';
+import BarGraph_Main from './BarChar_Main';
+import BarGraph_M from './BarChar_';
+import MarketDepthChart from './MarketDepth';
+//import BarChartCard from './BarChartCard';
+import dynamic from 'next/dynamic';
+
+// Dynamically import BarChartCard with SSR disabled.
+const BarChartCard = dynamic(() => import('./BarChartCard'), { ssr: false });
 //Modal.setAppElement("#root");
 
 interface MetricCardProps {
-    title: string;
-    value: string;
-    percentageChange: string;
-    subText: string;
-    graph: JSX.Element;
-    isPositiveChange: boolean;
-    onClick: () => void;
+  title: string;
+  value: string;
+  percentageChange: string;
+  subText: string;
+  graph: JSX.Element;
+  isPositiveChange: boolean;
+  onClick: () => void;
 }
 interface Impression {
-    name: string;
-    value: number;
+  name: string;
+  value: number;
+}
+interface CompImpression {
+  name: string;
+  value: number;
+  preval: number;
+}
+interface TimeSeries {
+  time: string;
+  aggregatedSentiment: number;
+}
+interface Engagement {
+  timestamp: string;
+  impressions: number;
+  likes: number;
+  retweets: number;
+  comments: number;
+  followers: number;
+}
+interface EngagementImpression {
+  name: string;
+  impression: number;
+  views: number;
+  volume: number;
 }
 interface MetricGridProps {
-    address: any;
-    name: any;
-    twitter: any;
-    tweetPerMinut: Impression[];
-    impression: Impression[];
-    engagement: Impression[];
+  address: any;
+  name: any;
+  twitter: any;
+  tweetPerMinut: Impression[];
+  impression: Impression[];
+  engagementData: Engagement[];
+  tweetEngagemnt: EngagementImpression[]
+  engagement: Impression[];
+  tweetViews: CompImpression[];
+  sentimentPlot: TimeSeries[];
+  tweetsWithAddress: { tweet: string; views: number; likes: number; timestamp: string }[];
+  holders: {amount: number;price: number; time:string}[]
+  live_prx: RawTradeData[]
 }
-const impressionsData = [
-    { name: "Jan 1", value: 70 },
-    { name: "Jan 2", value: 75 },
-    { name: "Jan 3", value: 80 },
-    { name: "Jan 4", value: 185 },
-    { name: "Jan 5", value: 90 },
-    { name: "Jan 6", value: 83 },
-    { name: "Jan 7", value: 183.45 },
-];
-const MetricCard: React.FC<MetricCardProps> = ({
-    title,
-    value,
-    percentageChange,
-    subText,
-    graph,
-    isPositiveChange,
-    onClick
-}) => {
-    return (
-        <div className="bg-gray-900 text-white p-4 rounded-lg shadow-md" onClick={onClick}>
-            {/* Title */}
-            <h3 className="text-sm text-gray-400 mb-1">{title}</h3>
+interface Props {
+  children?: React.ReactNode;
+}
 
-            {/* Main Value */}
-            <div className="text-2xl font-bold mb-2">{value}</div>
+const ClientOnly: React.FC<Props> = ({ children }) => {
+  const [mounted, setMounted] = React.useState(false);
 
-            {/* Percentage Change */}
-            <div
-                className={`text-sm ${isPositiveChange ? "text-green-400" : "text-red-400"}`}
-            >
-                {percentageChange}
-            </div>
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
 
-            {/* Subtext */}
-            <p className="text-xs text-gray-500 mt-1">{subText}</p>
+  if (!mounted) return null;
 
-            {/* Graph */}
-            <div className="mt-4">{graph}</div>
-        </div>
-    );
+  return <>{children}</>;
 };
+const MetricCard: React.FC<MetricCardProps> = ({
+  title,
+  value,
+  percentageChange,
+  subText,
+  graph,
+  isPositiveChange,
+  onClick
+}) => {
+  return (
+    <div className="bg-gray-900 text-white p-4 rounded-lg shadow-md" onClick={onClick}>
+      <h3 className="text-sm text-gray-400 mb-1">{title}</h3>
+      <div className="text-2xl font-bold mb-2">{value}</div>
+      <div className={`text-sm ${isPositiveChange ? "text-green-400" : "text-red-400"}`}>
+        {percentageChange}
+      </div>
+      <p className="text-xs text-gray-500 mt-1">{subText}</p>
+      <div className="mt-4">{graph}</div>
+    </div>
+  );
+};
+
+// ----------------- New Helper Functions -----------------
+
+/**
+ * Calculate tweet growth based on grouped data.
+ * Computes the average tweet count per interval and normalizes it
+ * against a maximum threshold (max tweets = 5 tweets/min * intervalMinutes).
+ */
 function calculateTweetGrowthFromGroupedData(data: Impression[], intervalMinutes: number): number {
-    if (data.length === 0) return 0;
-    const totalTweets = data.reduce((sum, d) => sum + d.value, 0);
-    const avgTweets = totalTweets / data.length;
-    const maxTweets = 5 * intervalMinutes; // For 5 tweets per minute threshold.
-    return Math.min(100, (avgTweets / maxTweets) * 100);
+  if (data.length === 0) return 0;
+  const totalTweets = data.reduce((sum, d) => sum + d.value, 0);
+  const avgTweets = totalTweets / data.length;
+  const maxTweets = 5 * intervalMinutes; // For 5 tweets per minute threshold.
+  return Math.min(100, (avgTweets / maxTweets) * 100);
 }
+
+/**
+ * Calculate impression growth as the percentage change from the first to the last impression.
+ */
+function calculateImpressionGrowth(impressionData: Impression[]): number {
+  if (impressionData.length < 2) return 0;
+  
+  let totalPercentChange = 0;
+  let validPairs = 0;
+  
+  for (let i = 1; i < impressionData.length; i++) {
+    const previousValue = impressionData[i - 1].value;
+    const currentValue = impressionData[i].value;
+    
+    // Skip pairs where the previous value is 0 to avoid division by zero.
+    if (previousValue === 0) continue;
+    
+    // Calculate percentage change from the previous to the current impression.
+    const percentChange = ((currentValue - previousValue) / previousValue) * 100;
+    totalPercentChange += percentChange;
+    validPairs++;
+  }
+  
+  // If no valid pairs were found, return 0.
+  return validPairs === 0 ? 0 : totalPercentChange / validPairs;
+}
+
+function calculateImpressionPlot(
+  data: EngagementImpression[],
+  period: number
+): Impression[] {
+  if (!data.length) return [];
+
+  // 1. Compute smoothing factor k = 2 / (N + 1)
+  const k = 2 / (period + 1);                          // :contentReference[oaicite:10]{index=10}
+
+  // 2. Initialize EMA with the first raw engagement value
+  const first = data[0];
+  let emaPrev = (first.impression / first.views)      // :contentReference[oaicite:11]{index=11}
+    * Math.sqrt(first.volume);
+
+  // 3. Map through data applying EMA
+  return data.map((point, index) => {
+    const engagement = point.impression * Math.sqrt( point.views);
+    const rawValue = engagement * Math.sqrt(point.volume);
+
+    if (index === 0) {
+      return { name: point.name, value: emaPrev };
+    }
+
+    // EMA formula: rawValue * k + previous EMA * (1 - k)
+    emaPrev = rawValue * k + emaPrev * (1 - k);        // :contentReference[oaicite:12]{index=12}
+    return { name: point.name, value: (emaPrev/25000)*100 };
+  });
+}
+/**
+ * Performs Poisson-based trend detection on engagement impression data
+ * @param data Array of engagement impression data points
+ * @param eta Sensitivity factor for trend detection (e.g., 2 = quite sensitive, 3 = very strict)
+ * @returns Array of normalized trend values between -1 and 1
+ */
+function calculatePoissonTrend(
+  data: EngagementImpression[],
+  eta: number = 2
+): { name: string; value: number }[] {
+  if (!data.length) return [];
+
+  // Precompute rates and exposures
+  const points = data.map(pt => ({
+    name: pt.name,
+    rate: pt.impression / pt.views,      // engagement rate
+    exposure: pt.volume                  // Poisson exposure
+  }));
+
+  return points.map((pt, i) => {
+    if (i === 0) {
+      // First point has no previous comparison
+      return { name: pt.name, value: 0 };
+    }
+
+    const prev = points[i - 1];
+    // Expected counts under previous rate
+    const k1 = prev.rate * prev.exposure;
+    // Observed (expected) counts under current rate
+    const k2 = pt.rate * pt.exposure;
+
+    // Poisson standard deviation = sqrt(mean)
+    const std = Math.sqrt(k1);
+    // z-score of observed change
+    const z = (k2 - k1) / std;
+
+    // Normalize using tanh to bound within [-1, 1]
+    let trend = Math.tanh(z / eta);
+
+    // Dampen if below significance threshold |z| < eta
+    if (Math.abs(z) < eta) trend *= 0.5;
+
+    return { name: pt.name, value: trend };
+  });
+}
+/*
+function calculateImpressionPlot(data: EngagementImpression[]): Impression[] {
+  return data.map((point, index) => {
+    let Engagement = (point.impression * Math.sqrt(point.volume)) / point.views
+    const averageEng = (point.impression);
+    return { name: point.name, value: Engagement };
+  });
+}*/
+function calculateCumulativeAverage(data: Impression[]): Impression[] {
+  let cumulativeSum = 0;
+  return data.map((point, index) => {
+    cumulativeSum += point.value;
+    const average = cumulativeSum / (index + 1);
+    return { name: point.name, value: average };
+  });
+}
+
+/**
+ * Calculates the cumulative sum of tweet counts.
+ * For each data point, it computes the sum of all tweet counts up to that point.
+ */
+function calculateCumulativeSum(data: Impression[]): Impression[] {
+  let cumulativeSum = 0;
+  return data.map((point) => {
+    cumulativeSum += point.value;
+    return { name: point.name, value: cumulativeSum };
+  });
+}
+
+
+/**
+ * Calculates the ratio (as a percentage, capped at 100) of cumulative tweet counts
+ * to the cumulative average of tweet views.
+ */
+function calculateCumulativeRatioPercentage(
+  tweetCounts: Impression[],
+  tweetViews: Impression[]
+): Impression[] {
+  const cumulativeAvgViews = calculateCumulativeAverage(tweetViews);
+  const cumulativeTweetCounts = calculateCumulativeSum(tweetCounts);
+  const minLength = Math.min(cumulativeAvgViews.length, cumulativeTweetCounts.length);
+  const ratioData: Impression[] = [];
+
+  for (let i = 0; i < minLength; i++) {
+    const avgViews = cumulativeAvgViews[i].value;
+    const totalTweets = cumulativeTweetCounts[i].value;
+    // Compute ratio (ensure no division by zero) and convert to percentage.
+    let ratio = avgViews !== 0 ? (totalTweets / avgViews) * 100 : 0;
+    ratio = Math.min(100, ratio); // Cap at 100%
+    ratioData.push({ name: cumulativeAvgViews[i].name, value: ratio });
+  }
+  return ratioData;
+}
+
+function calculateMovingAverage(data: Impression[], windowSize: number): Impression[] {
+  if (data.length === 0) return [];
+  
+  return data.map((point, index, arr) => {
+    // Determine the start index of the window
+    const startIndex = Math.max(0, index - windowSize + 1);
+    // Get the slice of data within the current window
+    const windowSlice = arr.slice(startIndex, index + 1);
+    // Calculate the sum of values in the window
+    const sum = windowSlice.reduce((acc, item) => acc + item.value, 0);
+    // Compute the average for the current window
+    const average = sum / windowSlice.length;
+    // Return a new Impression with the same timestamp and computed average
+    return { name: point.name, value: average };
+  });
+}
+
+/**
+ * Calculate the average current views per tweet overall.
+ */
+function calculateAverageViewsPerTweet(impressionData: Impression[], tweetData: Impression[]): number {
+  
+  const totalImpressions = impressionData.reduce((sum, imp) => {
+    const value = Number(imp.value);
+    return sum + (isNaN(value) ? 0 : value);
+  }, 0);
+  const totalTweets = tweetData.reduce((sum, tweet) => sum + tweet.value, 0);
+  //console.log("Views Per Tweet",impressionData)
+  return totalTweets > 0 ? totalImpressions / impressionData.length : 0;
+}
+
+/**
+ * Calculate the average views per tweet at each time point.
+ * Assumes tweetData and impressionData are aligned by time.
+ */
+function calculateAverageViewsPlot(tweetData: Impression[], impressionData: Impression[]): Impression[] {
+  const minLength = Math.min(tweetData.length, impressionData.length);
+  const result: Impression[] = [];
+  for (let i = 0; i < minLength; i++) {
+    const tweets = tweetData[i].value;
+    const impressions = impressionData[i].value;
+    const avgView = tweets > 0 ? impressions / tweets : 0;
+    result.push({ name: tweetData[i].name, value: avgView });
+  }
+  return result;
+}
+
+// -------------- Other Existing Helper Functions --------------
+
 function calculateSentimentMomentum(impressions: Impression[]): number {
-    if (impressions.length < 2) return 0;
-  
-    let totalPercentChange = 0;
+  if (impressions.length < 2) return 0;
+  let totalPercentChange = 0;
+  let count = 0;
+  for (let i = 0; i < impressions.length - 1; i++) {
+    const previous = impressions[i].value;
+    const current = impressions[i + 1].value;
+    if (previous === 0) continue;
+    const percentChange = ((current - previous) / previous) * 100;
+    totalPercentChange += percentChange;
+    count++;
+  }
+  const averagePercentChange = count > 0 ? totalPercentChange / count : 0;
+  return Math.min(100, Math.max(0, averagePercentChange));
+}
+function calculateSentimentTrend(
+  data: TimeSeries[],
+  windowSize: number = 5
+): TimeSeries[] {
+  if (!data || data.length === 0) return [];
+  const trend: TimeSeries[] = [];
+  for (let i = 0; i < data.length; i++) {
+    let sum = 0;
     let count = 0;
-  
-    for (let i = 0; i < impressions.length - 1; i++) {
-      const previous = impressions[i].value;
-      const current = impressions[i + 1].value;
-  
-      // Avoid division by zero
-      if (previous === 0) continue;
-  
-      // Calculate percentage change between consecutive values
-      const percentChange = ((current - previous) / previous) * 100;
-      totalPercentChange += percentChange;
+    // Average over the window (handle boundaries)
+    for (let j = Math.max(0, i - windowSize + 1); j <= i; j++) {
+      sum += data[j].aggregatedSentiment;
       count++;
     }
+    trend.push({ time: data[i].time, aggregatedSentiment: sum / count });
+  }
+  return trend;
+}
+/**
+ * Calculate a trend data series for tweet growth.
+ * For each adjacent pair of tweet records, compute the growth rate (tweet difference divided by time gap in minutes).
+ * Optionally, apply a moving average to smooth the curve.
+ */
+/**
+ * Calculate a tweet frequency trend over time.
+ * For each tweet timestamp, count the total tweet occurrences in the previous `windowMinutes`.
+ * Optionally, a moving average (smoothWindow) is applied to smooth the curve.
+ */
+/**
+ * Calculate a tweet frequency trend as a percentage over time.
+ * For each tweet record, count the number of tweets in the previous `windowMinutes`.
+ * Then apply a moving average (smoothWindow) and normalize the result against a total tweets threshold.
+ *
+ * @param data - Array of tweet counts with timestamps.
+ * @param windowMinutes - The time window (in minutes) over which to sum tweets.
+ * @param smoothWindow - Number of points to use for smoothing the trend.
+ * @param totalTweetsThreshold - The tweet count threshold considered as maximum hype (100%).
+ * @returns An array of objects with the timestamp and normalized tweet frequency percentage.
+ 
+*/
+/*
+function calculateTweetFrequencyTrendPercentage(
+  data: Impression[],
+  windowMinutes: number = 5,
+  smoothWindow: number = 3,
+  totalTweetsThreshold: number = 20
+): Impression[] {
+  if (data.length === 0) return [];
   
-    const averagePercentChange = count > 0 ? totalPercentChange / count : 0;
+  // Sort data by timestamp ascending.
+  const sortedData = [...data].sort(
+    (a, b) => new Date(a.name).getTime() - new Date(b.name).getTime()
+  );
+  //console.log("rawTrend",sortedData)
+  // Compute raw frequency values using a sliding window.
+  const rawTrend: Impression[] = sortedData.map(point => {
+    const currentTime = new Date(point.name).getTime();
+    const windowStart = currentTime - windowMinutes * 60000;
+    // Count tweets within the window.
+    const frequency = sortedData.filter(p => {
+      const time = new Date(p.name).getTime();
+      return time >= windowStart && time <= currentTime;
+    }).length;
   
-    // Clamp the result to be between 0 and 100
-    return Math.min(100, Math.max(0, averagePercentChange));
+    return { name: point.name, value: frequency };
+  });
+  
+  // Apply a simple moving average to smooth the raw frequency data.
+  function movingAverage(values: Impression[], windowSize: number): Impression[] {
+    return values.map((point, i, arr) => {
+      const start = Math.max(0, i - windowSize + 1);
+      const windowSlice = arr.slice(start, i + 1);
+      const avg = windowSlice.reduce((sum, p) => sum + p.value, 0) / windowSlice.length;
+      return { name: point.name, value: avg };
+    });
+  }
+  
+  const smoothedTrend = movingAverage(rawTrend, smoothWindow);
+  
+  // Normalize each smoothed frequency value to a percentage.
+  // The maximum expected tweets in the window is defined by totalTweetsThreshold.
+  const normalizedTrend = smoothedTrend.map(point => ({
+    name: point.name,
+    value: Math.min((point.value / totalTweetsThreshold) * 100, 100)
+  }));
+
+  return normalizedTrend;
+}
+*/
+function calculateTweetFrequencyTrendPercentage(
+  data: Impression[],
+  windowMinutes: number = 5,
+  smoothWindow: number = 3,
+  totalTweetsThreshold: number = 20
+): Impression[] {
+  if (data.length === 0) return [];
+
+  // Sort data by timestamp ascending.
+  const sortedData = [...data].sort(
+    (a, b) => new Date(a.name).getTime() - new Date(b.name).getTime()
+  );
+
+  // Compute raw frequency values using a sliding window.
+  const rawTrend: Impression[] = sortedData.map((point, index) => {
+    
+    const currentTime = new Date(point.name).getTime();
+    const windowStart = currentTime - windowMinutes * 60000;
+
+    // Sum tweet counts within the window.
+    let frequency = 0;
+    for (let i = index; i >= 0; i--) {
+      const time = new Date(sortedData[i].name).getTime();
+      if (time >= windowStart) {
+        frequency += sortedData[i].value;
+      } else {
+        break;
+      }
+    }
+
+    return { name: point.name, value: frequency };
+  });
+
+  // Apply a simple moving average to smooth the raw frequency data.
+  function movingAverage(values: Impression[], windowSize: number): Impression[] {
+    return values.map((point, i, arr) => {
+      const start = Math.max(0, i - windowSize + 1);
+      const windowSlice = arr.slice(start, i + 1);
+      const avg = windowSlice.reduce((sum, p) => sum + p.value, 0) / windowSlice.length;
+      return { name: point.name, value: avg };
+    });
   }
 
-  function calculateSentimentVolatility(impressions: Impression[]): number {
-    if (impressions.length < 2) return 0;
-  
-    // Determine the maximum impression value for normalization.
-    const maxImpression = Math.max(...impressions.map(imp => imp.value));
-  
-    // Calculate the weighted percentage changes between consecutive impressions.
-    const weightedChanges: number[] = [];
-    for (let i = 1; i < impressions.length; i++) {
-      const previous = impressions[i - 1].value;
-      const current = impressions[i].value;
-      
-      // Skip if previous is 0 to avoid division by zero.
-      if (previous === 0) continue;
-      
-      // Calculate basic percentage change.
-      const percentageChange = ((current - previous) / previous) * 100;
-      
-      // Weight the change by the strength of the current impression.
-      const weight = maxImpression > 0 ? current / maxImpression : 1;
-      const weightedChange = percentageChange * weight;
-      
-      weightedChanges.push(weightedChange);
-    }
-  
-    // Calculate the standard deviation of these weighted changes.
-    const averageChange = weightedChanges.reduce((sum, val) => sum + val, 0) / weightedChanges.length;
-    const variance =
-      weightedChanges.reduce((sum, val) => sum + Math.pow(val - averageChange, 2), 0) /
-      weightedChanges.length;
-      
-      const volatility = Math.sqrt(variance);
-      const volatilityPercentage = Math.min(100, Math.max(0, volatility));
-  
-      return volatilityPercentage;
+  const smoothedTrend = movingAverage(rawTrend, smoothWindow);
+
+  // Normalize each smoothed frequency value to a percentage.
+  // The maximum expected tweets in the window is defined by totalTweetsThreshold.
+  const normalizedTrend = smoothedTrend.map(point => ({
+    name: point.name,
+    value: Math.min((point.value / totalTweetsThreshold) * 100, 100)
+  }));
+
+  return normalizedTrend;
+}
+function calculateSentimentVolatility(impressions: Impression[]): number {
+  if (impressions.length < 2) return 0;
+  const maxImpression = Math.max(...impressions.map(imp => imp.value));
+  const weightedChanges: number[] = [];
+  for (let i = 1; i < impressions.length; i++) {
+    const previous = impressions[i - 1].value;
+    const current = impressions[i].value;
+    if (previous === 0) continue;
+    const percentageChange = ((current - previous) / previous) * 100;
+    const weight = maxImpression > 0 ? current / maxImpression : 1;
+    const weightedChange = percentageChange * weight;
+    weightedChanges.push(weightedChange);
   }
-  
+  const averageChange = weightedChanges.reduce((sum, val) => sum + val, 0) / weightedChanges.length;
+  const variance = weightedChanges.reduce((sum, val) => sum + Math.pow(val - averageChange, 2), 0) / weightedChanges.length;
+  const volatility = Math.sqrt(variance);
+  return Math.min(100, Math.max(0, volatility));
+}
 
 function calculateSentimentWeightedMetrics(impressions: Impression[], engagements: Impression[]): number {
-    if (impressions.length !== engagements.length || impressions.length === 0) return 0;
-
-    let weightedSum = 0;
-    let totalWeight = 0;
-
-    for (let i = 0; i < impressions.length; i++) {
-        weightedSum += impressions[i].value * engagements[i].value; // Impression * Engagement
-        totalWeight += engagements[i].value;
-    }
-
-    return totalWeight !== 0 ? weightedSum / totalWeight : 0;
+  if (impressions.length !== engagements.length || impressions.length === 0) return 0;
+  let weightedSum = 0;
+  let totalWeight = 0;
+  for (let i = 0; i < impressions.length; i++) {
+    weightedSum += impressions[i].value * engagements[i].value;
+    totalWeight += engagements[i].value;
+  }
+  return totalWeight !== 0 ? weightedSum / totalWeight : 0;
 }
 
 function detectSentimentPeaks(impressions: Impression[]): Impression[] {
-    if (impressions.length < 3) return [];
-
-    const peaks = [];
-    for (let i = 1; i < impressions.length - 1; i++) {
-        if (impressions[i].value > impressions[i - 1].value && impressions[i].value > impressions[i + 1].value) {
-            peaks.push(impressions[i]); // Local maxima
-        }
+  if (impressions.length < 3) return [];
+  const peaks = [];
+  for (let i = 1; i < impressions.length - 1; i++) {
+    if (impressions[i].value > impressions[i - 1].value && impressions[i].value > impressions[i + 1].value) {
+      peaks.push(impressions[i]);
     }
-
-    return peaks;
-}
-function calculateSentimentScore(
-    tweetGrowth: number,
-    callerMin: number,
-    impressionRate: number
-  ): number {
-    // Normalize each metric to a maximum of 100.
-    const normalizedTweetGrowth = tweetGrowth//Math.min(tweetGrowth, 100);
-    const normalizedCallerMin = Math.min(callerMin, 100);
-    const normalizedImpressionRate = impressionRate//Math.min(impressionRate, 100);
-  
-    // Define weights for each metric.
-    // You can adjust these weights based on which metric you want to emphasize.
-    const weightTweetGrowth = 0.2;
-    const weightCallerMin = 0.2;
-    const weightImpressionRate = 0.6;
-  
-    // Compute the weighted sentiment score.
-    const sentimentScore =
-      normalizedTweetGrowth * weightTweetGrowth +
-      normalizedCallerMin * weightCallerMin +
-      normalizedImpressionRate * weightImpressionRate;
-  
-    // Clamp the final score to a maximum of 100.
-    return Math.min(sentimentScore, 100);
   }
+  return peaks;
+}
+
+function calculateSentimentScore(
+  tweetFrequencyTrend: number, // expected as percentage (0-100)
+  sentimentTrend: number,      // expected as percentage (0-100)
+  views: number ,               // raw view count
+  numberTweet: number
+): number {
+  ////console.log(" tweetFrequencyTrend ",tweetFrequencyTrend,sentimentTrend,views,numberTweet)
+  // Normalize tweet frequency and sentiment trend to a maximum of 100.
+  const normalizedTweetFrequency = Math.min(tweetFrequencyTrend, 100);
+  const normalizedSentimentTrend = sentimentTrend*20 >= 100 ? 100 : sentimentTrend*20;//Math.min(sentimentTrend*10, 100);
+  
+  // Normalize views: if views >= 1000, treat as 100; otherwise, scale linearly.
+  const normalizedViews = views >= 1000 ? 100 : (views / 1000) * 100;
+  const normalizedTweetsNum = numberTweet >= 500 ? 100 : (numberTweet / 500) * 100;
+  
+  // Define weights for each metric (adjust these as needed)
+  const weightTweetFrequency = 0.35;
+  const weightSentimentTrend = 0.15;
+  const weightViews = 0.25;
+  const tweetWeigh = 0.25;
+  
+  const sentimentScore =
+    normalizedTweetFrequency * weightTweetFrequency +
+    normalizedSentimentTrend * weightSentimentTrend +
+    normalizedViews * weightViews +
+    normalizedTweetsNum * tweetWeigh;
+    
+  // Ensure the final score does not exceed 100.
+  return Math.min(sentimentScore, 100);
+}
+
   
 function calculateAveragePercentage(impressions: Impression[]): number {
-    if (impressions.length < 2) return 0; // If less than 2 impressions, no percentage difference to calculate
-
-    const percentageDifferences: number[] = [];
-
-    for (let i = 0; i < impressions.length - 1; i++) {
-        const currentValue = impressions[i].value;
-        const nextValue = impressions[i + 1].value;
-
-        // Calculate percentage difference between currentValue and nextValue
-        const percentageDiff = ((nextValue - currentValue) / currentValue) * 100;
-        percentageDifferences.push(percentageDiff);
-    }
-
-    // Calculate average percentage difference
-    const total = percentageDifferences.reduce((sum, diff) => sum + diff, 0);
-    return total / percentageDifferences.length;
+  if (impressions.length < 2) return 0;
+  const percentageDifferences: number[] = [];
+  for (let i = 0; i < impressions.length - 1; i++) {
+    const currentValue = impressions[i].value;
+    const nextValue = impressions[i + 1].value;
+    const percentageDiff = ((nextValue - currentValue) / currentValue) * 100;
+    percentageDifferences.push(percentageDiff);
+  }
+  const total = percentageDifferences.reduce((sum, diff) => sum + diff, 0);
+  return total / percentageDifferences.length;
 }
 
 function calculateSentimentMomentumPlot(impressions: Impression[]): Impression[] {
-    if (impressions.length < 2) {
-      return impressions.map(impression => ({ name: impression.name, value: 0 }));
-    }
-  
-    // Determine the maximum impression value in the data for normalization.
-    const maxImpression = Math.max(...impressions.map(imp => imp.value));
-  
-    const plot: Impression[] = [];
-    let cumulativeMomentum = 0;
-  
-    // The first point starts with 0 momentum.
-    plot.push({ name: impressions[0].name, value: 0 });
-  
-    for (let i = 1; i < impressions.length; i++) {
-      const previous = impressions[i - 1].value;
-      const current = impressions[i].value;
-      
-      // Calculate basic percentage change between consecutive values.
-      let percentageChange = 0;
-      if (previous !== 0) {
-        percentageChange = ((current - previous) / previous) * 100;
-      }
-      
-      // Weight the change by the strength of the current impression.
-      // The weight is normalized between 0 and 1 relative to the maximum impression.
-      const weight = maxImpression > 0 ? current / maxImpression : 1;
-      const weightedChange = percentageChange * weight;
-      
-      // Accumulate the weighted change to get the momentum.
-      cumulativeMomentum += weightedChange;
-      
-      // Store the momentum (in percentage terms) along with the timestamp.
-      plot.push({ name: impressions[i].name, value: cumulativeMomentum });
-    }
-    
-    return plot;
+  if (impressions.length < 2) {
+    return impressions.map(impression => ({ name: impression.name, value: 0 }));
   }
-  
+  const maxImpression = Math.max(...impressions.map(imp => imp.value));
+  const plot: Impression[] = [];
+  let cumulativeMomentum = 0;
+  plot.push({ name: impressions[0].name, value: 0 });
+  for (let i = 1; i < impressions.length; i++) {
+    const previous = impressions[i - 1].value;
+    const current = impressions[i].value;
+    let percentageChange = 0;
+    if (previous !== 0) {
+      percentageChange = ((current - previous) / previous) * 100;
+    }
+    const weight = maxImpression > 0 ? current / maxImpression : 1;
+    const weightedChange = percentageChange * weight;
+    cumulativeMomentum += weightedChange;
+    plot.push({ name: impressions[i].name, value: cumulativeMomentum });
+  }
+  return plot;
+}
   
 function calculateCumulativePercentage(impressions: Impression[]): Impression[] {
-    if (impressions.length < 2) {
-        return impressions; // Return as is if there aren't enough items to compare
-    }
+  if (impressions.length === 0) return [];
+  
+  const initialValue = impressions[0].value;
+  return impressions.map((imp, index) => ({
+    name: imp.name,
+    value: index === 0 ? 0 : (imp.value - initialValue) / initialValue
+  }));
+}
+function calculateImpressionPercentage(impressions: Impression[], windowSize: number = 3): Impression[] {
+  if (impressions.length === 0) return [];
 
-    // Initialize variables
-    const result: Impression[] = [];
-    let cumulativeSum = 0;
+  const percentageChanges: number[] = impressions.map((imp, index) => {
+    if (index === 0) return 0;
+    const prevValue = impressions[index - 1].value;
+    return prevValue === 0 ? 0 : ((imp.value - prevValue) / prevValue)*100;
+  });
 
-    for (let i = 0; i < impressions.length; i++) {
-        if (i === 0) {
-            // For the first element, cumulative sum is 0 as there's no previous value
-            result.push({ name: impressions[i].name, value: 0 });
-        } else {
-            // Calculate percentage difference from the previous value
-            const prevValue = impressions[i - 1].value;
-            const currValue = impressions[i].value;
+  const smoothedChanges: number[] = percentageChanges.map((_, index) => {
+    const start = Math.max(0, index - windowSize + 1);
+    const window = percentageChanges.slice(start, index + 1);
+    const average = window.reduce((sum, val) => sum + val, 0) / window.length;
+    return average;
+  });
 
-            // Avoid division by zero
-            if (prevValue !== 0) {
-                const percentageDiff = ((currValue - prevValue) / prevValue);
-                cumulativeSum += percentageDiff;
-            }
-
-            // Push the new object with cumulative sum
-            result.push({ name: impressions[i].name, value: cumulativeSum });
-        }
-    }
-
-    return result;
+  return impressions.map((imp, index) => ({
+    name: imp.name,
+    value: smoothedChanges[index],
+  }));
 }
 
+function categorizeTweetsByIntervalC(data: CompImpression[], minute: number): CompImpression[] {
+  // Helper function to round a date down to the nearest interval (in minutes)
+  function roundToNearestMinutes(date: Date): Date {
+    const msInMinutes = minute * 60 * 1000;
+    return new Date(Math.floor(date.getTime() / msInMinutes) * msInMinutes);
+  }
 
+  // Use an object map to group tweets by their rounded date interval.
+  const intervalMap: Record<string, { value: number; preval: number }> = {};
+
+  data.forEach(({ name, value, preval }) => {
+    const date = new Date(name);
+    const roundedDate = roundToNearestMinutes(date);
+    
+    // Format the rounded date to an ISO-like string including milliseconds.
+    const year = roundedDate.getFullYear();
+    const month = String(roundedDate.getMonth() + 1).padStart(2, '0');
+    const day = String(roundedDate.getDate()).padStart(2, '0');
+    const hours = String(roundedDate.getHours()).padStart(2, '0');
+    const minutesStr = String(roundedDate.getMinutes()).padStart(2, '0');
+    const seconds = String(roundedDate.getSeconds()).padStart(2, '0');
+    const milliseconds = String(roundedDate.getMilliseconds()).padStart(3, '0');
+    const intervalKey = `${year}-${month}-${day}T${hours}:${minutesStr}:${seconds}.${milliseconds}`;
+
+    if (!intervalMap[intervalKey]) {
+      intervalMap[intervalKey] = { value: 0, preval: 0 };
+    }
+    
+    // Add the current tweet's values into the correct interval.
+    intervalMap[intervalKey].value += value;
+    intervalMap[intervalKey].preval += preval;
+  });
+
+  // Convert the grouped intervals into an array of CompImpression objects.
+  const aggregatedData: CompImpression[] = Object.entries(intervalMap).map(
+    ([name, { value, preval }]) => ({ name, value, preval })
+  );
+  
+  // Sort the results in chronological order.
+  aggregatedData.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
+  
+  return aggregatedData;
+}
 function categorizeTweetsByInterval(data: Impression[], minute: number): Impression[] {
-    // Helper function to round a date down to the nearest specified minute
-    function roundToNearestMinutes(date: Date): Date {
-        const msInMinutes = minute * 60 * 1000;
-        return new Date(Math.floor(date.getTime() / msInMinutes) * msInMinutes);
+  function roundToNearestMinutes(date: Date): Date {
+    const msInMinutes = minute * 60 * 1000;
+    return new Date(Math.floor(date.getTime() / msInMinutes) * msInMinutes);
+  }
+  const intervalMap: Record<string, number> = {};
+  data.forEach(({ name, value }) => {
+    const date = new Date(name);
+    const roundedDate = roundToNearestMinutes(date);
+    const year = roundedDate.getFullYear();
+    const month = String(roundedDate.getMonth() + 1).padStart(2, '0');
+    const day = String(roundedDate.getDate()).padStart(2, '0');
+    const hours = String(roundedDate.getHours()).padStart(2, '0');
+    const minutes = String(roundedDate.getMinutes()).padStart(2, '0');
+    const seconds = String(roundedDate.getSeconds()).padStart(2, '0');
+    const milliseconds = String(roundedDate.getMilliseconds()).padStart(3, '0');
+    const intervalKey = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}`;
+    if (!intervalMap[intervalKey]) {
+      intervalMap[intervalKey] = 0;
     }
+    intervalMap[intervalKey] += value;
+  });
+  const aggregatedData: Impression[] = Object.entries(intervalMap).map(
+    ([name, value]) => ({ name, value })
+  );
+  aggregatedData.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
+  return aggregatedData;
+}
+const groupTweetsWithAddressByInterval = (
+  data: { timestamp: string; views: number }[],
+  intervalMinutes: number
+): { count: Impression[]; views: CompImpression[] } => {
+  const intervalMapCount: Record<string, number> = {};
+  const intervalMapViews: Record<string, number> = {};
 
-    // Map to store aggregated data
-    const intervalMap: Record<string, number> = {};
+  data.forEach((item) => {
+    const time = new Date(item.timestamp);
+    const msInInterval = intervalMinutes * 60 * 1000;
+    const roundedTime = new Date(Math.floor(time.getTime() / msInInterval) * msInInterval);
+    const key = roundedTime.toISOString();
 
-    data.forEach(({ name, value }) => {
-        const date = new Date(name);
-        const roundedDate = roundToNearestMinutes(date);
+    if (!intervalMapCount[key]) {
+      intervalMapCount[key] = 0;
+      intervalMapViews[key] = 0;
+    }
+    intervalMapCount[key] += 1;
+    intervalMapViews[key] += item.views;
+  });
 
-        // Format the date without converting to UTC
-        const year = roundedDate.getFullYear();
-        const month = String(roundedDate.getMonth() + 1).padStart(2, '0');
-        const day = String(roundedDate.getDate()).padStart(2, '0');
-        const hours = String(roundedDate.getHours()).padStart(2, '0');
-        const minutes = String(roundedDate.getMinutes()).padStart(2, '0');
-        const seconds = String(roundedDate.getSeconds()).padStart(2, '0');
-        const milliseconds = String(roundedDate.getMilliseconds()).padStart(3, '0');
+  // Build count array as before.
+  const countArray: Impression[] = Object.entries(intervalMapCount).map(
+    ([name, value]) => ({ name, value })
+  );
 
-        const intervalKey = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}`;
+  // Build views array where each entry is a CompImpression.
+  // Here, "value" contains the aggregated views, and "preval" carries the tweet count.
+  const viewsArray: CompImpression[] = Object.entries(intervalMapViews).map(
+    ([name, aggregatedViews]) => ({
+      name,
+      value: aggregatedViews,
+      preval: intervalMapCount[name]
+    })
+  );
 
-        if (!intervalMap[intervalKey]) {
-            intervalMap[intervalKey] = 0;
-        }
+  // Sort both arrays in chronological order.
+  countArray.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
+  viewsArray.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
 
-        intervalMap[intervalKey] += value;
-    });
+  return { count: countArray, views: viewsArray };
+};
+const parseViewsCount = (views: string): number => {
+  
+  if (views.endsWith('K')) {
+    return parseFloat(views) * 1000; // Convert "2K" to 2000
+  } else if (views.endsWith('M')) {
+    return parseFloat(views) * 1000000; // Convert "1M" to 1000000
+  } else if (views.endsWith('k')) {
+    return parseFloat(views) * 1000; // Convert "2K" to 2000
+  } else if (views.endsWith('m')) {
+    return parseFloat(views) * 1000000; // Convert "1M" to 1000000
+  }
+  return parseFloat(views); // For plain numbers
+};
+function parseISOLocal(s:any) {
+  const [year, month, day, hour, minute, second] = s.split(/\D/).map(Number);
+  return new Date(year, month - 1, day, hour, minute, second);
+}
+interface Impression { name: string; value: number; }
 
-    // Convert the map to an array of AggregatedData
-    const aggregatedData: Impression[] = Object.entries(intervalMap).map(
-        ([name, value]) => ({ name, value })
+// Helper: group raw Impression data into dynamic-minute intervals
+function categorizeByInterval(
+  data: Impression[],
+  minutes: number
+): Impression[] {
+  const ms = minutes * 60_000;
+  const map: Record<string, number> = {};
+
+  // 1) Bucket into intervals
+  data.forEach(({ name, value }) => {
+    const ts = new Date(name).getTime();
+    const bucketTs = Math.floor(ts / ms) * ms;
+    const d = new Date(bucketTs);
+
+    // Build a local-time ISO-style string: YYYY-MM-DDThh:mm:ss
+    const localIso = [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0'),
+    ].join('-')
+      + 'T'
+      + [
+        String(d.getHours()).padStart(2, '0'),
+        String(d.getMinutes()).padStart(2, '0'),
+        String(d.getSeconds()).padStart(2, '0'),
+      ].join(':');
+
+    map[localIso] = (map[localIso] || 0) + value;
+  });
+
+  // 2) Turn the map into a sorted array
+  const grouped = Object.entries(map)
+    .map(([name, value]) => ({ name, value }))
+    .sort(
+      (a, b) =>
+        new Date(a.name).getTime() - new Date(b.name).getTime()
     );
+  console.log('Grouped Data', grouped);
 
-    // Sort by interval
-    aggregatedData.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-
-    return aggregatedData;
+  // 3) Apply a 5-point (±2) rolling mean smoothing
+  return grouped.map((point, idx, arr) => {
+    const window = arr.slice(Math.max(0, idx - 2), idx + 3);
+    const avg =
+      window.reduce((sum, p) => sum + p.value, 0) / window.length;
+    return { name: point.name, value: avg };
+  });
 }
 
 
-const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetPerMinut, impression, engagement }) => {
-    //console.log("twitter,twitter", twitter, name)
-    let twt = `https://x.com/search?q=${address}`
-    if (twitter != null) {
-        twt = twitter
+// Group Engagement data into interval buckets
+
+function categorizeEngagementByInterval(
+  data: Engagement[],
+  minutes: number
+): Engagement[] {
+  const ms = minutes * 60_000;
+  const map: Record<string, Engagement> = {};
+
+  data.forEach(d => {
+    const ts = new Date(d.timestamp).getTime();
+    const bucketTs = Math.floor(ts / ms) * ms;
+    const b = new Date(bucketTs);
+
+    // Build a local-time ISO-style string: YYYY-MM-DDThh:mm:ss
+    const localIso = [
+      b.getFullYear(),
+      String(b.getMonth() + 1).padStart(2, '0'),
+      String(b.getDate()).padStart(2, '0'),
+    ].join('-')
+      + 'T'
+      + [
+        String(b.getHours()).padStart(2, '0'),
+        String(b.getMinutes()).padStart(2, '0'),
+        String(b.getSeconds()).padStart(2, '0'),
+      ].join(':');
+
+    if (!map[localIso]) {
+      map[localIso] = {
+        timestamp: localIso,
+        impressions: 0,
+        likes: 0,
+        retweets: 0,
+        comments: 0,
+        followers: d.followers,
+      };
     }
-    const [selectedMetric, setSelectedMetric] = useState<{ title: string; data: Impression[] | null } | null>(null);
 
-    const totalTweets_ = tweetPerMinut.reduce((sum, impression) => sum + impression.value, 0);
+    const bucket = map[localIso];
+    bucket.impressions += d.impressions;
+    bucket.likes       += d.likes;
+    bucket.retweets    += d.retweets;
+    bucket.comments    += d.comments;
+    // overwrite followers so it's always the most recent in that bucket
+    bucket.followers    = d.followers;
+  });
 
-    const [sentiment, setSentiment] = useState(0);
-    const [tweetGrowth, setTweetGrowth] = useState("");
-    const totalTweets = NumberFormatter.formatNumber(totalTweets_)
-
-    const tweetPerFVmints = categorizeTweetsByInterval(tweetPerMinut, 5)
-    const averagePercentageFv = calculateAveragePercentage(tweetPerFVmints);
-    const cummulatedSumFv = calculateCumulativePercentage(tweetPerFVmints)
-
-    const averagePercentage = calculateAveragePercentage(tweetPerMinut);
-    const cummulatedSum = calculateCumulativePercentage(tweetPerMinut)
-    const cumuImpression = calculateCumulativePercentage(impression)
-    const cumuAvrage = calculateAveragePercentage(impression)
-    const cumuEngage = calculateCumulativePercentage(engagement)
-    const cumuAvragEngage = calculateAveragePercentage(engagement)
-    const sentimentMomentum = calculateSentimentMomentum(impression);
-   const sentimentMomentumPlot = calculateSentimentMomentumPlot(impression);
-    const sentimentVolatility = calculateSentimentVolatility(impression);
-    const weightedSentiment = calculateSentimentWeightedMetrics(impression, engagement);
-    const sentimentPeaks = detectSentimentPeaks(impression);
-
-
-    const openPopup = (title: string, data: Impression[]) => {
-        setSelectedMetric({ title, data });
-    };
-
-    // Close Modal
-    const closePopup = () => {
-        setSelectedMetric(null);
-    };
-    useEffect(() => {
-        if (tweetPerMinut.length < 2) return;
-      
-        // Assume tweetPerMinut is sorted by time.
-        const firstTweetTime = new Date(tweetPerMinut[0].name).getTime();
-        const lastTweetTime = new Date(tweetPerMinut[tweetPerMinut.length - 1].name).getTime();
-      
-        // Calculate the time difference in minutes.
-        const timeDiffMinutes = (lastTweetTime - firstTweetTime) / (60 * 1000);
-      
-        // Sum up the total tweets.
-        const totalTweetsCount = tweetPerMinut.reduce((sum, tweet) => sum + tweet.value, 0);
-      
-        // Determine tweets per minute (avoid division by zero).
-        const tweetsPerMinute = timeDiffMinutes > 0 ? totalTweetsCount / timeDiffMinutes : totalTweetsCount;
-      
-        // Define a maximum tweets per minute threshold for normalization.
-        // For instance, if 100 tweets/min is our upper bound, then anything above counts as 100%.
-        const MAX_TWEETS_PER_MINUTE = 5;
-      
-        // Convert the frequency to a percentage of the maximum threshold.
-        const tweetsFrequencyPercentage = Math.min(100, (tweetsPerMinute / MAX_TWEETS_PER_MINUTE) * 100);
-      
-        // Format and update tweetGrowth state.
-        const tweetGrowth_ = (tweetsFrequencyPercentage.toFixed(2));
-        console.log("tweetGrowth_",tweetGrowth_)
-        setTweetGrowth(tweetGrowth_);
-      }, [tweetPerMinut]);
-      
-    useEffect(() => {
-        Modal.setAppElement("#root");
-        //console.log("cummulatedSum", cummulatedSum)
-        if (cummulatedSum.length == 0) {
-            return
-        }
-        let xnum =  (
-            Number(((cummulatedSum[cummulatedSum.length - 1].value / cummulatedSum.length) * 100)))
-        let imx = (Number(cumuImpression[cumuImpression.length - 1].value))
-        const sentimentScore =calculateSentimentScore(xnum,totalTweets_,cumuAvrage)// calculateSentimentScore(Number(cummulatedSum[cummulatedSum.length - 1].value), Number(cumuImpression[cumuImpression.length - 1].value));
-
-       /* const tweetGrowth_ = NumberFormatter.formatNumber(
-            Number(((cummulatedSum[cummulatedSum.length - 1].value / cummulatedSum.length) * 100).toFixed(2))
-        )
-        //console.log("Sentiment Score", sentimentScore)
-        setTweetGrowth(tweetGrowth_)*/
-        setSentiment(sentimentScore)
-    }, [cummulatedSum]);
-    return (
-        <div className="bg-gray-800 text-white rounded-lg p-4 shadow-lg max-w-md ">
-            <div id="root"></div>
-            {/* Top Section with Image and QR Code */}
-            <div className="flex items-center justify-between mb-4">
-
-                {/* Image */}
-                <div className="flex-grow border-100 border-black rounded-[5px] p-2">
-                    <img
-                        src={name} // Replace with your actual image URL
-                        alt="Top Display"
-                        className="rounded-[5px] w-full h-full object-cover"
-                        style={{ width: "150px" }}
-                    />
-                </div>
-                <div className="flex-grow"></div>
-                {/* QR Code */}
-                <div className="flex-shrink-0 mr-4 border-10 border-black rounded-[5px] p-2">
-                    <QRCodeCanvas value={address} size={150} className="rounded-[5px]" />
-                </div>
-
-
-
-            </div>
-
-            {/* Wallet Address */}
-            <p className="text-xs text-gray-400 mb-6 text-center">
-                Address: <span className="text-white font-mono bg-gray-500 p-1 rounded-[5px]">{address}</span>
-            </p>
-
-            {/* Buttons */}
-            <div className="flex space-x-2 mb-4">
-                <a
-                    href={twt} // Replace with the desired Twitter search URL
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-1/2 bg-green-500 text-white py-2 rounded-lg font-bold text-center"
-                >
-                    X/Twitter
-                </a>
-                <a
-                    href={`https://dexscreener.com/search?q=${address}`} // Replace with the desired DexScreener URL
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-1/2 bg-gray-700 text-gray-300 py-2 rounded-lg font-bold text-center"
-                >
-                    DexScreener
-                </a>
-            </div>
-
-            {/* Metric Cards */}
-            <div className="grid grid-cols-2 gap-4 h-[50vh] overflow-y-auto">
-                <MetricCard
-                    title="Tweet Growth #2"
-                    value={(cummulatedSum.length > 0 ? tweetGrowth : 0) + "%"}
-                    percentageChange={(Number(tweetGrowth) > 0 ? "+" : "") + tweetGrowth + "% TM"}
-                    subText={(cummulatedSum.length > 0 ? tweetGrowth : 0) + "% Tweet Growths Indicate a" + (Number(tweetGrowth) > 0 ? " Positive" : " Negetive") + " Sentiments"}
-                    isPositiveChange={Number(tweetGrowth) > 0}
-                    graph={<LineGraph data={cummulatedSum} color="#10B981" />}
-                    onClick={() => openPopup("Tweet Growth Avg", cummulatedSum)}
-                />
-                <MetricCard
-                    title="Callers/min (Avg.)"
-                    value={totalTweets}
-                    percentageChange={(averagePercentage > 0 ? "+" : "") + averagePercentage.toFixed(2) + "% TM"}
-                    subText={averagePercentage.toFixed(2) + (averagePercentage > 0 ? " Increase" : " Descrease") + " In tweets/Mins" + (averagePercentage > 0 ? " Bullish" : " Bearish") + " sentiment"}
-                    isPositiveChange={averagePercentage > 0}
-                    graph={<LineGraph data={tweetPerMinut} color="#10B981" />}
-                    onClick={() => openPopup("Callers/min (Avg.)", tweetPerMinut)}
-                />
-                <MetricCard
-                    title="Callers/5min (Avg.)"
-                    value={totalTweets}
-                    percentageChange={(averagePercentageFv > 0 ? "+" : "") + averagePercentageFv.toFixed(2) + "% TM"}
-                    subText={averagePercentageFv.toFixed(2) + (averagePercentageFv > 0 ? " Increase" : " Descrease") + " In tweets/Mins" + (averagePercentageFv > 0 ? " Bullish" : " Bearish") + " sentiment"}
-                    isPositiveChange={averagePercentageFv > 0}
-                    graph={<LineGraph data={tweetPerFVmints} color="#10B981" />}
-                    onClick={() => openPopup("Callers/min (Avg.)", tweetPerFVmints)}
-                />{/*
-                <MetricCard
-                    title="Engagement (Avg.)"
-                    value={(cumuEngage.length > 0 ? NumberFormatter.formatNumber(Number(cumuEngage[cumuEngage.length - 1].value.toFixed(2))) : 0) + "%"}
-                    percentageChange={(cumuAvragEngage > 0 ? "+" : "") + cumuAvragEngage.toFixed(2) + "% Engage"}
-                    subText="engagements meter"
-                    isPositiveChange={cumuAvragEngage > 0}
-                    graph={<LineGraph data={cumuEngage} color="#10B981" />}
-                    onClick={() => openPopup("Engagement (Avg.)", cumuEngage)}
-                />*/}
-                <MetricCard
-                    title="Impressions (Avg.%)"
-                    value={(cumuImpression.length > 0 ? NumberFormatter.formatNumber(Number(cumuImpression[cumuImpression.length - 1].value.toFixed(2))) : 0) + "%"}
-                    percentageChange={(cumuAvrage > 0 ? "+" : "") + cumuAvrage.toFixed(2) + "% Impression"}
-                    subText={cumuAvrage.toFixed(2) + (cumuAvrage > 0 ? " Increase" : " Descrease") + " In Impression suggest a " + (cumuAvrage > 0 ? " Bullish" : " Bearish") + " sentiment"}
-                    isPositiveChange={cumuAvrage > 0}
-                    graph={<LineGraph data={cumuImpression} color="#10B981" />}
-                    onClick={() => openPopup("Impressions Avg", cumuImpression)}
-                />
-{/*
-                <MetricCard
-                    title="Sentiment Momentum"
-                    value={sentimentMomentum.toFixed(2)}
-                    percentageChange="Momentum Rate"
-                    subText="Average sentiment change over time"
-                    isPositiveChange={sentimentMomentum > 0}
-                    graph={<LineGraph data={sentimentMomentumPlot} color="#3B82F6" />}
-                    onClick={() => openPopup("Sentiment Momentum", impression)}
-                />*/}
-                <MetricCard
-                    title="Sentiment Volatility"
-                    value={sentimentVolatility.toFixed(2)}
-                    percentageChange="Variability"
-                    subText="Variability in sentiment over time"
-                    isPositiveChange={sentimentVolatility < 10}
-                    graph={<LineGraph data={impression} color="#F59E0B" />}
-                    onClick={() => openPopup("Sentiment Volatility", impression)}
-                />
-               {/* <MetricCard
-                    title="Weighted Sentiment"
-                    value={weightedSentiment.toFixed(2)}
-                    percentageChange="Weighted Value"
-                    subText="Sentiment adjusted for engagement"
-                    isPositiveChange={weightedSentiment > 0}
-                    graph={<LineGraph data={impression} color="#10B981" />}
-                    onClick={() => openPopup("Weighted Sentiment", engagement)}
-                />*/}
-                <MetricCard
-                    title="Peak Sentiments"
-                    value={sentimentPeaks.length.toString()}
-                    percentageChange="Detected Peaks"
-                    subText="Number of sentiment peaks detected"
-                    isPositiveChange={sentimentPeaks.length > 0}
-                    graph={<LineGraph data={sentimentPeaks} color="#EF4444" />}
-                    onClick={() => openPopup("Peak Sentiments", sentimentPeaks)}
-                />
-            </div>
-            <div style={{ textAlign: "center", padding: "20px" }}>
-                <h1>Sentiment Meter</h1>
-
-                <SentimentMeter value={Math.round(sentiment)} />
-            </div>
-            {/* Popup Modal */}
-            <Modal
-                isOpen={!!selectedMetric}
-                onRequestClose={closePopup}
-                contentLabel="Metric Details"
-                className="bg-gray-900 text-white w-[90vw] max-w-[1400px] h-[85vh] max-w-2xl mx-auto rounded-lg p-6 shadow-lg"
-                overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
-            >
-                {selectedMetric && (
-                    <>
-                        <h3 className="text-xl font-bold mb-4">{selectedMetric.title}</h3>
-                        <DLineGraph data={selectedMetric.data || []} color="#3B82F6" detailed />
-                        <button
-                            className="mt-6 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded"
-                            onClick={closePopup}
-                        >
-                            Close
-                        </button>
-                    </>
-                )}
-            </Modal>
-        </div>
+  return Object.values(map)
+    .sort(
+      (a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
+}
+
+// Calculate weighted engagement growth across all buckets
+function calculateEngagementGrowth(data: Engagement[], intervalMinutes: number, maxPerMin: number = 500): number {
+  if (data.length === 0) return 0;
+
+  const weights = { impressions: 0.1, likes: 0.3, retweets: 0.4, comments: 0.2 };
+
+  // compute normalized score per bucket
+  const scores = data.map(d => {
+    const sum =
+      d.impressions * weights.impressions +
+      d.likes * weights.likes +
+      d.retweets * weights.retweets +
+      d.comments * weights.comments;
+    return d.followers > 0 ? sum / d.followers : sum;
+  });
+
+  // growth relative to first bucket
+  const first = scores[0];
+  const last = scores[scores.length - 1];
+  const rawGrowth = first > 0 ? ((last - first) / first) * 100 : 0;
+  return rawGrowth;
+}
+
+// Prepare time-series of engagement rate per bucket
+function engagementRateSeries(data: Engagement[]): Impression[] {
+  return data.map(d => {
+    const score =
+      (d.impressions * 0.05 + d.likes * 0.25 + d.retweets * 0.5 + d.comments * 0.2) /
+      (d.followers > 0 ? d.followers : 1);
+    return { name: d.timestamp, value: score };
+  });
+}
+
+const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetPerMinut, impression,engagementData,tweetEngagemnt, engagement,tweetViews,sentimentPlot,tweetsWithAddress,holders,live_prx }) => {
+  
+  let twt = `https://x.com/search?q=${address}`;
+  if (twitter != null) {
+    twt = twitter;
+  }
+  const [selectedMetric, setSelectedMetric] = useState<{ title: string; data: Impression[] | null } | null>(null);
+  const [selectedTimeMetric, setSelectedTimeMetric] = useState<{ title: string; data: TimeSeries[] | null } | null>(null);
+  const [selectedbarMetric, setSelectedbarMetric] = useState<{ title: string; data: Impression[] | null } | null>(null);
+  const [showMarketDepthModal, setShowMarketDepthModal] = useState(false);
+  const totalTweets_ = tweetPerMinut.reduce((sum, tweet) => sum + tweet.value, 0);
+  const totalTweets = NumberFormatter.formatNumber(totalTweets_);
+  const tweetViewsPerFVmints = categorizeTweetsByIntervalC(tweetViews, 5);
+  const movingAverageTweetViews = calculateMovingAverage(tweetViewsPerFVmints, 9);
+
+////console.log("Impression Data",tweetViewsPerFVmints)
+  // Group tweets by 5 minutes.
+  const tweetPerFVmints = categorizeTweetsByInterval(tweetPerMinut, 5);
+  const tweetPerTnmints = categorizeTweetsByInterval(tweetPerMinut, 10);
+
+  const tweetViewsRatioPercentage =calculateCumulativeRatioPercentage (
+    tweetPerFVmints,
+    tweetViews
+  );
+  
+  //calculateTweetViewsRatioPercentage(tweetPerTnmints,movingAverageTweetViews)
+  // Calculate tweet growth based on the 5-minute grouping.
+  const tweetGrowthPercentage = calculateTweetGrowthFromGroupedData(tweetPerFVmints, 5);
+  // Calculate impression growth percentage.
+  const impressionGrowthPercentage = calculateImpressionGrowth(impression);
+  // Calculate the overall average views per tweet (as a number).
+  const avgViewsPerTweet = calculateAverageViewsPerTweet(tweetViews, tweetPerMinut);
+  // Calculate the average views per tweet over time for plotting.
+  const averageViewsPlot = calculateAverageViewsPlot(tweetPerMinut, impression);
+
+  const averagePercentageFv = calculateAveragePercentage(tweetPerFVmints);
+  //const cummulatedSumFv = calculateCumulativePercentage(tweetPerFVmints);
+  const averagePercentage = calculateAveragePercentage(tweetPerMinut);
+  //const cummulatedSum = calculateCumulativePercentage(tweetPerMinut);
+  const cumuImpression = calculateImpressionPercentage(impression);
+  ////console.log("Impression",impression)
+  const weighBasedImpression = calculateImpressionPlot(tweetEngagemnt,14)
+  const cumuAvrage = calculateAveragePercentage(impression);
+  const cumuEngage = calculateCumulativePercentage(engagement);
+  const cumuAvragEngage = calculateAveragePercentage(engagement);
+  const sentimentMomentum = calculateSentimentMomentum(impression);
+  const sentimentMomentumPlot = calculateSentimentMomentumPlot(impression);
+  const sentimentVolatility = calculateSentimentVolatility(impression);
+  const weightedSentiment = calculateSentimentWeightedMetrics(impression, engagement);
+  const sentimentPeaks = detectSentimentPeaks(impression);
+  const tweetFrequencyTrend = calculateTweetFrequencyTrendPercentage(tweetPerMinut, 5, 5,50);
+  const sentimentTrend = calculateSentimentTrend(sentimentPlot, 30);
+  const currentSentimentTrend = sentimentTrend[sentimentTrend.length - 1]?.aggregatedSentiment || 0;
+  const currentTweetFrequencyTrend = tweetFrequencyTrend[tweetFrequencyTrend.length - 1]?.value || 0;
+  const rawViews = avgViewsPerTweet; 
+  const avgLstView = calculateAverageViewsPerTweet(tweetViewsPerFVmints.slice(-15),tweetViewsPerFVmints.slice(-15))
+  
+  //console.log("AVGGGGG",avgLstView,tweetViewsPerFVmints.slice(-15),tweetViewsPerFVmints.slice(-15))
+  const { count: tweetsWithAddressCount, views: tweetsWithAddressViews } = groupTweetsWithAddressByInterval(
+    tweetsWithAddress,
+    5
+  );
+  const totalTweetsWithAddress = tweetsWithAddressCount.reduce(
+    (sum, { value }) => sum + value,
+    0
+  );
+   // Determine interval based on volume
+   const dynamicInterval = impression.length > 500 ? 2 : impression.length > 200 ? 5 : 2;
+
+   // Impressions processing
+   const impressionsGrouped = calculatePoissonTrend(tweetEngagemnt)//categorizeByInterval(engagement, dynamicInterval);
+   const impressionGrowth = impressionsGrouped.length > 0
+     ? impressionsGrouped[impressionsGrouped.length - 1].value
+     : 0;
+ 
+   // Engagement processing
+   const engagementGrouped = categorizeEngagementByInterval(engagementData, dynamicInterval);
+   const engagementGrowth = calculateEngagementGrowth(engagementGrouped, dynamicInterval);
+   const engagementSeries = engagementRateSeries(engagementGrouped);
+ 
+  const tweetsWithAddressFrequency = calculateTweetFrequencyTrendPercentage(tweetsWithAddressCount, 5, 3, 40);
+  const currentTweetWiAddFrequencyTrend = tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1]?.value || 0;
+  const tweetwithAddAvgViews = calculateAverageViewsPerTweet(tweetsWithAddressViews, tweetsWithAddressCount);
+  const tweetwithAddAvgViewsS = calculateAverageViewsPerTweet(tweetsWithAddressViews.slice(-15), tweetsWithAddressCount.slice(-15));
+  //console.log("Holders",holders)
+  //console.log("Average Holders per Tweet",holders,"Live Price",live_prx)
+  const openPopup = (title: string, data: Impression[]) => {
+    setSelectedMetric({ title, data });
+  };
+  const openPopupTime = (title: string, data: TimeSeries[]) => {
+    setSelectedTimeMetric({ title, data });
+  };
+  const openPopupBar = (title: string, data: Impression[]) => {
+    setSelectedbarMetric({ title, data });
+  };
+
+  const closePopup = () => {
+    setSelectedMetric(null);
+    setSelectedTimeMetric(null);
+    setSelectedbarMetric(null)
+  };
+
+  useEffect(() => {
+    Modal.setAppElement("#root");
+  }, []);
+      // --- CORRECTED DOWNLOAD FUNCTION ---
+      const downloadDataAsCSV = () => {
+        let csvContent = "";
+
+        // Helper to escape CSV values (handles commas, quotes, newlines)
+        const escapeCsvValue = (value: string): string => { // Input should now always be string
+            //const stringValue = String(value ?? ''); // Ensure it's a string, handle null/undefined - No longer needed here if input is string
+            if (/[",\n]/.test(value)) {
+                return `"${value.replace(/"/g, '""')}"`; // Quote and escape existing quotes
+            }
+            return value;
+        };
+
+        // Helper to add a dataset to the CSV string
+        // The rowFormatter MUST return string[]
+        const addSection = (title: string, headers: string[], data: any[], rowFormatter: (item: any) => string[]) => {
+            csvContent += `${escapeCsvValue(title)}\n`;
+            csvContent += headers.map(escapeCsvValue).join(',') + '\n';
+            data.forEach(item => {
+                // Row formatter now guarantees string[], escape each one
+                csvContent += rowFormatter(item).map(escapeCsvValue).join(',') + '\n';
+            });
+            csvContent += '\n'; // Add a blank line separator
+        };
+
+        // Add each dataset used in the plots, ensuring numbers are converted to strings
+        addSection(
+            "Tweet Frequency Trend (%)",
+            ["Timestamp", "Value"],
+            tweetFrequencyTrend,
+            (item: Impression) => [item.name, String(item.value)] // Convert number to string
+        );
+
+        addSection(
+            "Tweet w/ Address Frequency (%)",
+            ["Timestamp", "Value"],
+            tweetsWithAddressFrequency,
+            (item: Impression) => [item.name, String(item.value)] // Convert number to string
+        );
+
+        addSection(
+            "Callers/min (Raw)",
+            ["Timestamp", "Value"],
+            tweetPerMinut,
+            (item: Impression) => [item.name, String(item.value)] // Convert number to string
+        );
+
+        addSection(
+            "Callers/5min (Grouped)",
+            ["Timestamp", "Value"],
+            tweetPerFVmints,
+            (item: Impression) => [item.name, String(item.value)] // Convert number to string
+        );
+
+         addSection(
+            "Tweets w/ Address Count (5min Grouped)",
+            ["Timestamp", "Count"],
+            tweetsWithAddressCount,
+            (item: Impression) => [item.name, String(item.value)] // Convert number to string
+        );
+
+        addSection(
+            "Impression Growth (Percentage Change, Smoothed)",
+            ["Timestamp", "Percentage Change"],
+            cumuImpression,
+            (item: Impression) => [item.name, String(item.value)] // Convert number to string
+        );
+
+         addSection(
+            "Impression Growth (Grouped Avg)",
+            ["Timestamp", "Average Value"],
+            impressionsGrouped,
+            (item: Impression) => [item.name, String(item.value)] // Convert number to string
+        );
+
+        addSection(
+            "Sentiment Trend (Smoothed)",
+            ["Timestamp", "Aggregated Sentiment"],
+            sentimentTrend,
+            (item: TimeSeries) => [item.time, String(item.aggregatedSentiment)] // Convert number to string
+        );
+
+        addSection(
+            "Peak Sentiments (Detected on Smoothed % Change)",
+            ["Timestamp", "Value"],
+            sentimentPeaks,
+            (item: Impression) => [item.name, String(item.value)] // Convert number to string
+        );
+
+        addSection(
+            "Average Views/Tweet (5min Grouped)",
+            ["Timestamp", "Current Views", "Previous Views (Count)"],
+            tweetViewsPerFVmints,
+            (item: CompImpression) => [item.name, String(item.value), String(item.preval)] // Convert numbers to string
+        );
+
+        addSection(
+            "Views for Tweets w/ Address (5min Grouped)",
+             ["Timestamp", "Aggregated Views", "Tweet Count"],
+            tweetsWithAddressViews,
+            (item: CompImpression) => [item.name, String(item.value), String(item.preval)] // Convert numbers to string
+        );
+
+        addSection(
+            "AvgTweetMade/AvgViews (Cumulative Ratio %)",
+            ["Timestamp", "Ratio (%)"],
+            tweetViewsRatioPercentage,
+            (item: Impression) => [item.name, String(item.value)] // Convert number to string
+        );
+
+        addSection(
+            "Engagement Rate Series (Grouped)",
+            ["Timestamp", "Engagement Rate Score"],
+            engagementSeries,
+            (item: Impression) => [item.name, String(item.value)] // Convert number to string
+        );
+
+        // Create blob and trigger download
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        const safeAddress = address?.replace(/[^a-z0-9]/gi, '_') || 'unknown_address';
+        link.setAttribute("download", `metrics_data_${safeAddress}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    };
+    // --- END CORRECTED DOWNLOAD FUNCTION ---
+  //console.log(" SSDDDD ",NumberFormatter.formatNumber(Number(((Number(parseViewsCount(totalTweets))/avgViewsPerTweet)*100).toFixed(2))),parseViewsCount(totalTweets),avgViewsPerTweet)
+  return (
+    <div className="bg-gray-800 text-white rounded-lg p-4 shadow-lg w-full">
+      <div id="root"></div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex-grow border-100 border-black rounded-[5px] p-2">
+          <img
+            src={name}
+            alt="Top Display"
+            className="rounded-[5px] w-full h-full object-cover"
+            style={{ width: "150px" }}
+          />
+        </div>
+        <div className="flex-grow"></div>
+        <div className="flex-shrink-0 mr-4 border-10 border-black rounded-[5px] p-2">
+          <QRCodeCanvas value={address} size={150} className="rounded-[5px]" />
+        </div>
+      </div>
+      <p className="text-xs text-gray-400 mb-6 text-center">
+        Address: <span className="text-white font-mono bg-gray-500 p-1 rounded-[5px]">{address}</span>
+      </p>
+      <div className="flex space-x-2 mb-4">
+        <a
+          href={twt}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-1/2 bg-green-500 text-white py-2 rounded-lg font-bold text-center"
+        >
+          X/Twitter
+        </a>
+        <a
+          href={`https://dexscreener.com/search?q=${address}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-1/2 bg-gray-700 text-gray-300 py-2 rounded-lg font-bold text-center"
+        >
+          DexScreener
+        </a>
+      </div>
+      {/* --- NEW DOWNLOAD BUTTON --- */}
+      <div className="mb-4">
+                 <button
+                    onClick={downloadDataAsCSV}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg font-bold text-center transition duration-150 ease-in-out"
+                 >
+                    Download Plot Data (CSV)
+                 </button>
+            </div>
+             {/* --- END NEW DOWNLOAD BUTTON --- */}
+      {/*
+      <div className="md:col-span-1 h-64 cursor-pointer" onClick={() => setShowMarketDepthModal(true)}> {/* Adjust height (h-64) as needed *//*}
+            <MarketDepthChart
+                orderBookData={holders}
+                livePriceData={live_prx}
+            />
+        </div>*/}
+      <div className="grid grid-cols-2 gap-4 h-[50vh] overflow-y-auto">
+      
+      <MetricCard
+          title="Tweet Frequency Trend (%)"
+          value={tweetFrequencyTrend.length > 0 ? tweetFrequencyTrend[tweetFrequencyTrend.length - 1].value.toFixed(2) +"%": "0%"}
+          percentageChange=""
+          subText="Frequency of tweets over time"
+          isPositiveChange={tweetFrequencyTrend.length > 0 && tweetFrequencyTrend[tweetFrequencyTrend.length - 1].value > 0}
+          graph={<LineGraph data={tweetFrequencyTrend} color="#10B981" />}
+          onClick={() => openPopup("Tweet Frequency Trend", tweetFrequencyTrend)}
+        />
+        <MetricCard
+          title="Tweet w/ Address Frequency (%)"
+          value={
+            tweetsWithAddressFrequency.length > 0
+              ? tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1].value.toFixed(2) + "%"
+              : "0%"
+          }
+          percentageChange=""
+          subText="Frequency trend for tweets with address"
+          isPositiveChange={
+            tweetsWithAddressFrequency.length > 0 &&
+            tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1].value > 0
+          }
+          graph={<LineGraph data={tweetsWithAddressFrequency} color="#34D399" />}
+          onClick={() => openPopup("Tweet w/ Address Frequency", tweetsWithAddressFrequency)}
+        />
+        <MetricCard
+          title="Callers/min (Avg.)"
+          value={totalTweets}
+          percentageChange={(averagePercentage > 0 ? "+" : "") + averagePercentage.toFixed(2) + "%"}
+          subText={averagePercentage.toFixed(2) + (averagePercentage > 0 ? " Increase" : " Decrease") + " in tweets/min"}
+          isPositiveChange={averagePercentage > 0}
+          graph={<LineGraph data={tweetPerMinut} color="#10B981" />}
+          onClick={() => openPopup("Callers/min (Avg.)", tweetPerMinut)}
+        />
+        <MetricCard
+          title="Callers/5min (Avg.)"
+          value={totalTweets}
+          percentageChange={(averagePercentageFv > 0 ? "+" : "") + averagePercentageFv.toFixed(2) + "%"}
+          subText={averagePercentageFv.toFixed(2) + (averagePercentageFv > 0 ? " Increase" : " Decrease") + " in tweets/5min"}
+          isPositiveChange={averagePercentageFv > 0}
+          graph={<LineGraph data={tweetPerFVmints} color="#10B981" />}
+          onClick={() => openPopup("Callers/5min (Avg.)", tweetPerFVmints)}
+        />
+        <MetricCard
+          title="Tweets w/ Address (5min Count)"
+          value={
+            totalTweetsWithAddress.toString()
+          }
+          percentageChange=""
+          subText="Number of tweets with address per 5 minutes"
+          isPositiveChange={
+            tweetsWithAddressCount.length > 0 &&
+            tweetsWithAddressCount[tweetsWithAddressCount.length - 1].value > 0
+          }
+          graph={<LineGraph data={tweetsWithAddressCount} color="#60A5FA" />}
+          onClick={() => openPopup("Tweets w/ Address Count", tweetsWithAddressCount)}
+        />
+        {weighBasedImpression.length> 0 && (
+          <MetricCard
+          
+            title="Impression Growth"
+            value={isNaN(weighBasedImpression[weighBasedImpression.length-1].value) ?"0%":weighBasedImpression[weighBasedImpression.length-1].value.toFixed(2) + "%"}
+            percentageChange={(weighBasedImpression[weighBasedImpression.length-1].value >= 0 ? "+" : "") + isNaN(weighBasedImpression[weighBasedImpression.length-1].value) ?"0%":weighBasedImpression[weighBasedImpression.length-1].value.toFixed(2) + "%"}
+            subText={isNaN(weighBasedImpression[weighBasedImpression.length-1].value) ?"0% change in impressions":weighBasedImpression[weighBasedImpression.length-1].value.toFixed(2) + "% change in impressions"}
+            isPositiveChange={weighBasedImpression[weighBasedImpression.length-1].value >= 0}
+            graph={<LineGraph data={weighBasedImpression} color="#10B981" />}
+            onClick={() => openPopup("Impression Growth", weighBasedImpression)}
+          />
+        ) 
+        }
+        <MetricCard
+          title="Impression Growth"
+          value={impressionGrowth.toFixed(2) + "%"}
+          percentageChange={(impressionGrowth >= 0 ? "+" : "") + impressionGrowth.toFixed(2) + "%"}
+          subText={`Avg. impressions per ${dynamicInterval}-minute interval`}
+          isPositiveChange={impressionGrowthPercentage >= 0}
+          graph={<BarGraph_M data={impressionsGrouped} />}
+          onClick={() => openPopup("Impression Growth", impressionsGrouped)}
+        />
+        
+        <MetricCard
+          title="Sentiment Volatility"
+          value={calculateSentimentVolatility(impression).toFixed(2)}
+          percentageChange="Variability"
+          subText="Variability in sentiment over time"
+          isPositiveChange={sentimentVolatility < 10}
+          graph={<LineGraphTimeS data={sentimentTrend} color="#F59E0B" />}
+          onClick={() => openPopupTime("Sentiment Volatility", sentimentTrend)}
+        />
+        <MetricCard
+          title="Peak Sentiments"
+          value={detectSentimentPeaks(cumuImpression).length.toString()}
+          percentageChange="Detected Peaks"
+          subText="Number of sentiment peaks detected"
+          isPositiveChange={detectSentimentPeaks(cumuImpression).length > 0}
+          graph={<LineGraph data={detectSentimentPeaks(cumuImpression)} color="#EF4444" />}
+          onClick={() => openPopup("Peak Sentiments", detectSentimentPeaks(cumuImpression))}
+        />
+        <MetricCard
+          title="Avg. Views/Tweet"
+          value={NumberFormatter.formatNumber(Number(avgViewsPerTweet.toFixed(2)))}
+          percentageChange=""
+          subText="Overall average views per tweet"
+          isPositiveChange={avgViewsPerTweet >= 0}
+          graph={<BarGraph data={tweetViewsPerFVmints}/>}
+          onClick={() => openPopupBar("Average Views/Tweet", tweetViewsPerFVmints)}
+        />
+        <MetricCard
+            title="Views for Tweets w/ Address (5min)"
+            value={NumberFormatter.formatNumber(Number(tweetwithAddAvgViews.toFixed(2)))}
+              
+            percentageChange=""
+            subText="Aggregated views per 5 minutes for tweets with address"
+            isPositiveChange={
+              tweetsWithAddressViews.length > 0 &&
+              tweetsWithAddressViews[tweetsWithAddressViews.length - 1].value > 0
+            }
+            graph={<BarGraph data={tweetsWithAddressViews}  />}
+            onClick={() => openPopupBar("Views for Tweets w/ Address", tweetsWithAddressViews)}
+          />
+          <MetricCard
+          title="AvgTweetMade/AvgViews"
+          value={NumberFormatter.formatNumber(Number(((Number(parseViewsCount(totalTweets))/avgViewsPerTweet)*100).toFixed(2)))}
+          percentageChange=""
+          subText="Overall Interest of callers"
+          isPositiveChange={avgViewsPerTweet >= 0}
+          graph={<LineGraph data={tweetViewsRatioPercentage} color="#3B82F6" />}
+          onClick={() => openPopup("Average Views/Tweet", tweetViewsRatioPercentage)}
+        />
+      </div>
+      <div className="flex flex-col justify-center items-center h-screen">
+        <h1>Hype Meter</h1>
+        <SentimentMeter score={Math.round(calculateSentimentScore(currentTweetFrequencyTrend, currentSentimentTrend,avgLstView,Number(totalTweets) ))} />
+        <h1>Hype Meter For Address</h1>
+        <SentimentMeter score={Math.round(calculateSentimentScore(currentTweetWiAddFrequencyTrend, currentSentimentTrend,tweetwithAddAvgViewsS,totalTweetsWithAddress ))} />
+      </div>
+      {/* Modal for Market Depth Chart Popup */}
+      <Modal
+        isOpen={showMarketDepthModal}
+        onRequestClose={() => setShowMarketDepthModal(false)}
+        contentLabel="Market Depth Popup"
+        style={{
+          content: {
+            top: '0',
+            left: '0',
+            right: '0',
+            bottom: '0',
+            padding: '1rem',
+            background: '#1F2937', // Tailwind gray-800 color
+            border: 'none'
+          },
+          overlay: {
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            zIndex: 1000
+          }
+        }}
+      >
+        <div className="h-full flex flex-col">
+          <h2 className="text-2xl text-white mb-4">Market Depth</h2>
+          <div className="flex-grow">
+            <MarketDepthChart
+              orderBookData={holders}
+              livePriceData={live_prx}
+            />
+          </div>
+          <button
+            onClick={() => setShowMarketDepthModal(false)}
+            className="mt-4 bg-gray-700 text-white py-2 px-4 rounded self-end"
+          >
+            Close
+          </button>
+        </div>
+      </Modal>
+      <Modal
+        isOpen={!!selectedMetric || !!selectedTimeMetric || !!selectedbarMetric}
+        onRequestClose={closePopup}
+        contentLabel="Metric Details"
+        className="bg-gray-900 text-white w-[90vw] max-w-[1400px] h-[85vh] mx-auto rounded-lg p-6 shadow-lg"
+        overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
+      >
+        {selectedMetric && (
+          <>
+            <h3 className="text-xl font-bold mb-4">{selectedMetric.title}</h3>
+            <DLineGraph data={selectedMetric.data || []} color="#3B82F6" detailed />
+            <button
+              className="mt-6 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded"
+              onClick={closePopup}
+            >
+              Close
+            </button>
+          </>
+        ) || selectedTimeMetric && (
+          <>
+            <h3 className="text-xl font-bold mb-4">{selectedTimeMetric.title}</h3>
+            <LineGraphTimeD data={selectedTimeMetric.data || []} color="#3B82F6" />
+            <button
+              className="mt-6 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded"
+              onClick={closePopup}
+            >
+              Close
+            </button>
+          </>
+        ) || selectedbarMetric && (
+          <>
+            <h3 className="text-xl font-bold mb-4">{selectedbarMetric.title}</h3>
+            <BarGraph_Main data={selectedbarMetric.data || []}/>
+            <button
+              className="mt-6 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded"
+              onClick={closePopup}
+            >
+              Close
+            </button>
+          </>
+        )}
+      </Modal>
+     
+    </div>
+  );
 };
 
 export default MetricsGrid;
 
-
 interface SentimentMeterProps {
-    value: number; // Value between 0 and 100
+  score: number; // Value between 0 and 100
 }
+const SentimentMeter: React.FC<SentimentMeterProps> = ({ score }) => {
+  // Determine color based on score
+  const getColor = (score: number) => {
+    if (score < 25) return "#FF4136"; // Fear - Red
+    if (score < 50) return "#FF851B"; // Caution - Orange
+    if (score < 75) return "#FFDC00"; // Neutral - Yellow
+    return "#2ECC40"; // Greed - Green
+  };
 
-const SentimentMeter: React.FC<SentimentMeterProps> = ({ value }) => {
-    const boundedValue = Math.min(100, Math.max(0, value)); // Clamp value between 0 and 100
-    const rotation = (boundedValue / 100) * 180 - 90; // Convert value to degrees
+  // Calculate rotation angle for the needle (0-180 degrees)
+  // For a semicircular dial, we need to rotate from -90 to 90 degrees
+  // where -90 is 0% and 90 is 100%
+  const needleRotation = -90 + (score / 100) * 180;
+  
+  return (
+    <div className="relative w-60 h-60">
+      <svg viewBox="0 0 100 60" className="w-full h-full">
+        {/* Gradient background for the dial */}
+        <defs>
+          <linearGradient id="dialGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#FF4136" />
+            <stop offset="33%" stopColor="#FF851B" />
+            <stop offset="66%" stopColor="#FFDC00" />
+            <stop offset="100%" stopColor="#2ECC40" />
+          </linearGradient>
+        </defs>
+        
+        {/* Dial background - semi-circle */}
+        <path 
+          d="M 10,50 A 40,40 0 0,1 90,50" 
+          stroke="url(#dialGradient)" 
+          strokeWidth="10" 
+          fill="none" 
+        />
+        
+        {/* Needle with correct rotation */}
+        <g transform={`rotate(${needleRotation}, 50, 50)`}>
+          <line 
+            x1="50" 
+            y1="50" 
+            x2="50" 
+            y2="15" 
+            stroke={getColor(score)} 
+            strokeWidth="2" 
+          />
+          <circle cx="50" cy="50" r="3" fill={getColor(score)} />
+        </g>
 
-    // Determine sentiment label and color
-    const sentimentLabel =
-        boundedValue < 25
-            ? "Fear"
-            : boundedValue < 50
-                ? "Caution"
-                : boundedValue < 75
-                    ? "Neutral"
-                    : "Confidence";
-
-    const labelColor =
-        boundedValue < 25
-            ? "red"
-            : boundedValue < 50
-                ? "orange"
-                : boundedValue < 75
-                    ? "yellowgreen"
-                    : "green";
-
-    const meterStyle: React.CSSProperties = {
-        position: "relative",
-        width: "250px",
-        height: "125px",
-        backgroundColor: "#2E2E2E", // Dark background
-        borderRadius: "250px 250px 0 0", // Semi-circle
-        overflow: "hidden",
-    };
-
-    const segmentContainerStyle: React.CSSProperties = {
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        justifyContent: "space-between",
-        padding: "10px 20px",
-    };
-
-    const segmentStyle = (color: string): React.CSSProperties => ({
-        flex: 1,
-        height: "20px",
-        margin: "0 5px",
-        backgroundColor: color,
-        borderRadius: "10px",
-    });
-
-    const dialStyle: React.CSSProperties = {
-        position: "absolute",
-        bottom: "0",
-        left: "50%",
-        width: "2px",
-        height: "100px",
-        backgroundColor: "white",
-        transformOrigin: "bottom",
-        transform: `rotate(${rotation}deg)`,
-    };
-
-    const pointerCircleStyle: React.CSSProperties = {
-        position: "absolute",
-        bottom: "-10px",
-        left: "50%",
-        transform: "translateX(-50%)",
-        width: "20px",
-        height: "20px",
-        backgroundColor: "red",
-        borderRadius: "50%",
-    };
-
-    const labelStyle: React.CSSProperties = {
-        textAlign: "center",
-        marginTop: "20px",
-        color: "white",
-        fontSize: "20px",
-        fontWeight: "bold",
-    };
-
-    const valueStyle: React.CSSProperties = {
-        fontSize: "40px",
-        color: "white",
-    };
-
-    const sentimentStyle: React.CSSProperties = {
-        color: labelColor,
-    };
-
-    return (
-        <div style={{ textAlign: "center" }}>
-            {/* Semi-circle meter */}
-            <div style={meterStyle}>
-                {/* Segments */}
-                <div style={segmentContainerStyle}>
-                    <div style={segmentStyle("red")} />
-                    <div style={segmentStyle("orange")} />
-                    <div style={segmentStyle("yellowgreen")} />
-                    <div style={segmentStyle("green")} />
-                </div>
-
-                {/* Dial */}
-                <div style={dialStyle}>
-                    <div style={pointerCircleStyle} />
-                </div>
-            </div>
-
-            {/* Value and sentiment */}
-            <div style={labelStyle}>
-                <div style={valueStyle}>{boundedValue}</div>
-                <div style={sentimentStyle}>{sentimentLabel}</div>
-            </div>
-        </div>
-    );
+        {/* Tick marks and labels */}
+        <text x="10" y="58" fontSize="6" textAnchor="middle" fill="white">0</text>
+        <text x="30" y="58" fontSize="6" textAnchor="middle" fill="white">25</text>
+        <text x="50" y="58" fontSize="6" textAnchor="middle" fill="white">50</text>
+        <text x="70" y="58" fontSize="6" textAnchor="middle" fill="white">75</text>
+        <text x="90" y="58" fontSize="6" textAnchor="middle" fill="white">100</text>
+      </svg>
+      
+      {/* Score display */}
+      <div className="absolute bottom-0 left-0 right-0 text-center text-sm font-bold">
+        {score < 25 ? "Extreme Fear" : 
+         score < 50 ? "Fear" : 
+         score < 75 ? "Greed" : "Extreme Greed"}
+        <div className="text-sm font-bold">{score.toFixed(0)}</div>
+      </div>
+    </div>
+  );
 };

@@ -1,4 +1,4 @@
-import React, { JSX, useState, useEffect } from 'react';
+import React, { JSX, useState, useEffect,ReactNode } from 'react';
 import LineGraph from "./LineGraph";
 import LineGraphTimeS from "./LineGraphTimeS"
 import DLineGraph from './DetailedLineGraph';
@@ -10,7 +10,10 @@ import ReactDOM from "react-dom";
 import LineGraphTimeD from "./LineGraphTimeD"
 import BarGraph from './BarChar';
 import BarGraph_Main from './BarChar_Main';
+import BarGraph_M from './BarChar_';
 import MarketDepthChart from './MarketDepth';
+import { Signal as SignalIcon, Users as UsersIcon, Eye as EyeIcon } from 'lucide-react';
+
 //import BarChartCard from './BarChartCard';
 import dynamic from 'next/dynamic';
 
@@ -26,6 +29,7 @@ interface MetricCardProps {
   graph: JSX.Element;
   isPositiveChange: boolean;
   onClick: () => void;
+  toggleControls?: React.ReactNode; 
 }
 interface Impression {
   name: string;
@@ -40,12 +44,28 @@ interface TimeSeries {
   time: string;
   aggregatedSentiment: number;
 }
+interface Engagement {
+  timestamp: string;
+  impressions: number;
+  likes: number;
+  retweets: number;
+  comments: number;
+  followers: number;
+}
+interface EngagementImpression {
+  name: string;
+  impression: number;
+  views: number;
+  volume: number;
+}
 interface MetricGridProps {
   address: any;
   name: any;
   twitter: any;
   tweetPerMinut: Impression[];
   impression: Impression[];
+  engagementData: Engagement[];
+  tweetEngagemnt: EngagementImpression[]
   engagement: Impression[];
   tweetViews: CompImpression[];
   sentimentPlot: TimeSeries[];
@@ -56,6 +76,7 @@ interface MetricGridProps {
 interface Props {
   children?: React.ReactNode;
 }
+
 const ClientOnly: React.FC<Props> = ({ children }) => {
   const [mounted, setMounted] = React.useState(false);
 
@@ -74,17 +95,23 @@ const MetricCard: React.FC<MetricCardProps> = ({
   subText,
   graph,
   isPositiveChange,
-  onClick
+  onClick,
+  toggleControls
 }) => {
   return (
-    <div className="bg-gray-900 text-white p-4 rounded-lg shadow-md" onClick={onClick}>
+    <div className="bg-gray-900 text-white p-4 rounded-lg shadow-md">
+      {toggleControls && (
+        <div className="mb-2">
+          {toggleControls}
+        </div>
+      )}
       <h3 className="text-sm text-gray-400 mb-1">{title}</h3>
       <div className="text-2xl font-bold mb-2">{value}</div>
       <div className={`text-sm ${isPositiveChange ? "text-green-400" : "text-red-400"}`}>
         {percentageChange}
       </div>
       <p className="text-xs text-gray-500 mt-1">{subText}</p>
-      <div className="mt-4">{graph}</div>
+      <div className="mt-4" onClick={onClick}>{graph}</div>
     </div>
   );
 };
@@ -130,6 +157,87 @@ function calculateImpressionGrowth(impressionData: Impression[]): number {
   return validPairs === 0 ? 0 : totalPercentChange / validPairs;
 }
 
+function calculateImpressionPlot(
+  data: EngagementImpression[],
+  period: number
+): Impression[] {
+  if (!data.length) return [];
+
+  // 1. Compute smoothing factor k = 2 / (N + 1)
+  const k = 2 / (period + 1);                          // :contentReference[oaicite:10]{index=10}
+
+  // 2. Initialize EMA with the first raw engagement value
+  const first = data[0];
+  let emaPrev = (first.impression / first.views)      // :contentReference[oaicite:11]{index=11}
+    * Math.sqrt(first.volume);
+
+  // 3. Map through data applying EMA
+  return data.map((point, index) => {
+    const engagement = point.impression * Math.sqrt( point.views);
+    const rawValue = engagement * Math.sqrt(point.volume);
+
+    if (index === 0) {
+      return { name: point.name, value: emaPrev };
+    }
+
+    // EMA formula: rawValue * k + previous EMA * (1 - k)
+    emaPrev = rawValue * k + emaPrev * (1 - k);        // :contentReference[oaicite:12]{index=12}
+    return { name: point.name, value: (emaPrev/25000)*100 };
+  });
+}
+/**
+ * Performs Poisson-based trend detection on engagement impression data
+ * @param data Array of engagement impression data points
+ * @param eta Sensitivity factor for trend detection (e.g., 2 = quite sensitive, 3 = very strict)
+ * @returns Array of normalized trend values between -1 and 1
+ */
+function calculatePoissonTrend(
+  data: EngagementImpression[],
+  eta: number = 2
+): { name: string; value: number }[] {
+  if (!data.length) return [];
+
+  // Precompute rates and exposures
+  const points = data.map(pt => ({
+    name: pt.name,
+    rate: pt.impression / pt.views,      // engagement rate
+    exposure: pt.volume                  // Poisson exposure
+  }));
+
+  return points.map((pt, i) => {
+    if (i === 0) {
+      // First point has no previous comparison
+      return { name: pt.name, value: 0 };
+    }
+
+    const prev = points[i - 1];
+    // Expected counts under previous rate
+    const k1 = prev.rate * prev.exposure;
+    // Observed (expected) counts under current rate
+    const k2 = pt.rate * pt.exposure;
+
+    // Poisson standard deviation = sqrt(mean)
+    const std = Math.sqrt(k1);
+    // z-score of observed change
+    const z = (k2 - k1) / std;
+
+    // Normalize using tanh to bound within [-1, 1]
+    let trend = Math.tanh(z / eta);
+
+    // Dampen if below significance threshold |z| < eta
+    if (Math.abs(z) < eta) trend *= 0.5;
+
+    return { name: pt.name, value: trend };
+  });
+}
+/*
+function calculateImpressionPlot(data: EngagementImpression[]): Impression[] {
+  return data.map((point, index) => {
+    let Engagement = (point.impression * Math.sqrt(point.volume)) / point.views
+    const averageEng = (point.impression);
+    return { name: point.name, value: Engagement };
+  });
+}*/
 function calculateCumulativeAverage(data: Impression[]): Impression[] {
   let cumulativeSum = 0;
   return data.map((point, index) => {
@@ -280,55 +388,7 @@ function calculateSentimentTrend(
  * @returns An array of objects with the timestamp and normalized tweet frequency percentage.
  
 */
-/*
-function calculateTweetFrequencyTrendPercentage(
-  data: Impression[],
-  windowMinutes: number = 5,
-  smoothWindow: number = 3,
-  totalTweetsThreshold: number = 20
-): Impression[] {
-  if (data.length === 0) return [];
-  
-  // Sort data by timestamp ascending.
-  const sortedData = [...data].sort(
-    (a, b) => new Date(a.name).getTime() - new Date(b.name).getTime()
-  );
-  //console.log("rawTrend",sortedData)
-  // Compute raw frequency values using a sliding window.
-  const rawTrend: Impression[] = sortedData.map(point => {
-    const currentTime = new Date(point.name).getTime();
-    const windowStart = currentTime - windowMinutes * 60000;
-    // Count tweets within the window.
-    const frequency = sortedData.filter(p => {
-      const time = new Date(p.name).getTime();
-      return time >= windowStart && time <= currentTime;
-    }).length;
-  
-    return { name: point.name, value: frequency };
-  });
-  
-  // Apply a simple moving average to smooth the raw frequency data.
-  function movingAverage(values: Impression[], windowSize: number): Impression[] {
-    return values.map((point, i, arr) => {
-      const start = Math.max(0, i - windowSize + 1);
-      const windowSlice = arr.slice(start, i + 1);
-      const avg = windowSlice.reduce((sum, p) => sum + p.value, 0) / windowSlice.length;
-      return { name: point.name, value: avg };
-    });
-  }
-  
-  const smoothedTrend = movingAverage(rawTrend, smoothWindow);
-  
-  // Normalize each smoothed frequency value to a percentage.
-  // The maximum expected tweets in the window is defined by totalTweetsThreshold.
-  const normalizedTrend = smoothedTrend.map(point => ({
-    name: point.name,
-    value: Math.min((point.value / totalTweetsThreshold) * 100, 100)
-  }));
 
-  return normalizedTrend;
-}
-*/
 function calculateTweetFrequencyTrendPercentage(
   data: Impression[],
   windowMinutes: number = 5,
@@ -344,6 +404,7 @@ function calculateTweetFrequencyTrendPercentage(
 
   // Compute raw frequency values using a sliding window.
   const rawTrend: Impression[] = sortedData.map((point, index) => {
+    
     const currentTime = new Date(point.name).getTime();
     const windowStart = currentTime - windowMinutes * 60000;
 
@@ -429,7 +490,7 @@ function calculateSentimentScore(
   views: number ,               // raw view count
   numberTweet: number
 ): number {
-  //console.log(" tweetFrequencyTrend ",tweetFrequencyTrend,sentimentTrend,views,numberTweet)
+  ////console.log(" tweetFrequencyTrend ",tweetFrequencyTrend,sentimentTrend,views,numberTweet)
   // Normalize tweet frequency and sentiment trend to a maximum of 100.
   const normalizedTweetFrequency = Math.min(tweetFrequencyTrend, 100);
   const normalizedSentimentTrend = sentimentTrend*20 >= 100 ? 100 : sentimentTrend*20;//Math.min(sentimentTrend*10, 100);
@@ -648,8 +709,167 @@ const parseViewsCount = (views: string): number => {
   }
   return parseFloat(views); // For plain numbers
 };
+function parseISOLocal(s:any) {
+  const [year, month, day, hour, minute, second] = s.split(/\D/).map(Number);
+  return new Date(year, month - 1, day, hour, minute, second);
+}
+interface Impression { name: string; value: number; }
 
-const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetPerMinut, impression, engagement,tweetViews,sentimentPlot,tweetsWithAddress,holders,live_prx }) => {
+// Helper: group raw Impression data into dynamic-minute intervals
+function categorizeByInterval(
+  data: Impression[],
+  minutes: number
+): Impression[] {
+  const ms = minutes * 60_000;
+  const map: Record<string, number> = {};
+
+  // 1) Bucket into intervals
+  data.forEach(({ name, value }) => {
+    const ts = new Date(name).getTime();
+    const bucketTs = Math.floor(ts / ms) * ms;
+    const d = new Date(bucketTs);
+
+    // Build a local-time ISO-style string: YYYY-MM-DDThh:mm:ss
+    const localIso = [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0'),
+    ].join('-')
+      + 'T'
+      + [
+        String(d.getHours()).padStart(2, '0'),
+        String(d.getMinutes()).padStart(2, '0'),
+        String(d.getSeconds()).padStart(2, '0'),
+      ].join(':');
+
+    map[localIso] = (map[localIso] || 0) + value;
+  });
+
+  // 2) Turn the map into a sorted array
+  const grouped = Object.entries(map)
+    .map(([name, value]) => ({ name, value }))
+    .sort(
+      (a, b) =>
+        new Date(a.name).getTime() - new Date(b.name).getTime()
+    );
+  console.log('Grouped Data', grouped);
+
+  // 3) Apply a 5-point (±2) rolling mean smoothing
+  return grouped.map((point, idx, arr) => {
+    const window = arr.slice(Math.max(0, idx - 2), idx + 3);
+    const avg =
+      window.reduce((sum, p) => sum + p.value, 0) / window.length;
+    return { name: point.name, value: avg };
+  });
+}
+
+
+// Group Engagement data into interval buckets
+
+function categorizeEngagementByInterval(
+  data: Engagement[],
+  minutes: number
+): Engagement[] {
+  const ms = minutes * 60_000;
+  const map: Record<string, Engagement> = {};
+
+  data.forEach(d => {
+    const ts = new Date(d.timestamp).getTime();
+    const bucketTs = Math.floor(ts / ms) * ms;
+    const b = new Date(bucketTs);
+
+    // Build a local-time ISO-style string: YYYY-MM-DDThh:mm:ss
+    const localIso = [
+      b.getFullYear(),
+      String(b.getMonth() + 1).padStart(2, '0'),
+      String(b.getDate()).padStart(2, '0'),
+    ].join('-')
+      + 'T'
+      + [
+        String(b.getHours()).padStart(2, '0'),
+        String(b.getMinutes()).padStart(2, '0'),
+        String(b.getSeconds()).padStart(2, '0'),
+      ].join(':');
+
+    if (!map[localIso]) {
+      map[localIso] = {
+        timestamp: localIso,
+        impressions: 0,
+        likes: 0,
+        retweets: 0,
+        comments: 0,
+        followers: d.followers,
+      };
+    }
+
+    const bucket = map[localIso];
+    bucket.impressions += d.impressions;
+    bucket.likes       += d.likes;
+    bucket.retweets    += d.retweets;
+    bucket.comments    += d.comments;
+    // overwrite followers so it's always the most recent in that bucket
+    bucket.followers    = d.followers;
+  });
+
+  return Object.values(map)
+    .sort(
+      (a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+}
+
+// Calculate weighted engagement growth across all buckets
+function calculateEngagementGrowth(data: Engagement[], intervalMinutes: number, maxPerMin: number = 500): number {
+  if (data.length === 0) return 0;
+
+  const weights = { impressions: 0.1, likes: 0.3, retweets: 0.4, comments: 0.2 };
+
+  // compute normalized score per bucket
+  const scores = data.map(d => {
+    const sum =
+      d.impressions * weights.impressions +
+      d.likes * weights.likes +
+      d.retweets * weights.retweets +
+      d.comments * weights.comments;
+    return d.followers > 0 ? sum / d.followers : sum;
+  });
+
+  // growth relative to first bucket
+  const first = scores[0];
+  const last = scores[scores.length - 1];
+  const rawGrowth = first > 0 ? ((last - first) / first) * 100 : 0;
+  return rawGrowth;
+}
+
+// Prepare time-series of engagement rate per bucket
+function engagementRateSeries(data: Engagement[]): Impression[] {
+  return data.map(d => {
+    const score =
+      (d.impressions * 0.05 + d.likes * 0.25 + d.retweets * 0.5 + d.comments * 0.2) /
+      (d.followers > 0 ? d.followers : 1);
+    return { name: d.timestamp, value: score };
+  });
+}
+interface InfoBoxProps {
+  title: string;
+  value: string | number;
+  icon?: ReactNode;
+}
+
+const InfoBox: React.FC<InfoBoxProps> = ({ title, value, icon }) => {
+  return (
+    <div className="bg-gray-700 rounded-lg p-4 shadow flex items-center">
+      {icon && <div className="mr-4">{icon}</div>}
+      <div>
+        <h3 className="text-gray-400 text-sm font-medium">{title}</h3>
+        <p className="text-white text-xl font-bold">{value}</p>
+      </div>
+    </div>
+  );
+};
+
+const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetPerMinut, impression, engagementData, tweetEngagemnt, engagement, tweetViews, sentimentPlot, tweetsWithAddress, holders, live_prx }) => {
+  
   let twt = `https://x.com/search?q=${address}`;
   if (twitter != null) {
     twt = twitter;
@@ -658,22 +878,28 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   const [selectedTimeMetric, setSelectedTimeMetric] = useState<{ title: string; data: TimeSeries[] | null } | null>(null);
   const [selectedbarMetric, setSelectedbarMetric] = useState<{ title: string; data: Impression[] | null } | null>(null);
   const [showMarketDepthModal, setShowMarketDepthModal] = useState(false);
+
+  // New state variables for toggle functionality
+  const [activeTweetMetric, setActiveTweetMetric] = useState<'frequency' | 'address'>('frequency');
+  const [activeCallerMetric, setActiveCallerMetric] = useState<'min' | 'fiveMin' | 'address'>('min');
+  const [activeImpressionMetric, setActiveImpressionMetric] = useState<'growth' | 'volatility' | 'peaks'>('growth');
+  const [activeEngagementMetric, setActiveEngagementMetric] = useState<'growth' | 'peaks'>('growth');
+  const [activeViewsMetric, setActiveViewsMetric] = useState<'average' | 'address' | 'ratio'>('average');
+  
   const totalTweets_ = tweetPerMinut.reduce((sum, tweet) => sum + tweet.value, 0);
   const totalTweets = NumberFormatter.formatNumber(totalTweets_);
   const tweetViewsPerFVmints = categorizeTweetsByIntervalC(tweetViews, 5);
   const movingAverageTweetViews = calculateMovingAverage(tweetViewsPerFVmints, 9);
 
-//console.log("Impression Data",tweetViewsPerFVmints)
   // Group tweets by 5 minutes.
   const tweetPerFVmints = categorizeTweetsByInterval(tweetPerMinut, 5);
   const tweetPerTnmints = categorizeTweetsByInterval(tweetPerMinut, 10);
 
-  const tweetViewsRatioPercentage =calculateCumulativeRatioPercentage (
+  const tweetViewsRatioPercentage = calculateCumulativeRatioPercentage(
     tweetPerFVmints,
     tweetViews
   );
   
-  //calculateTweetViewsRatioPercentage(tweetPerTnmints,movingAverageTweetViews)
   // Calculate tweet growth based on the 5-minute grouping.
   const tweetGrowthPercentage = calculateTweetGrowthFromGroupedData(tweetPerFVmints, 5);
   // Calculate impression growth percentage.
@@ -684,28 +910,24 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   const averageViewsPlot = calculateAverageViewsPlot(tweetPerMinut, impression);
 
   const averagePercentageFv = calculateAveragePercentage(tweetPerFVmints);
-  //const cummulatedSumFv = calculateCumulativePercentage(tweetPerFVmints);
   const averagePercentage = calculateAveragePercentage(tweetPerMinut);
-  //const cummulatedSum = calculateCumulativePercentage(tweetPerMinut);
   const cumuImpression = calculateImpressionPercentage(impression);
-  //console.log("Impression",impression)
+  const weighBasedImpression = calculateImpressionPlot(tweetEngagemnt,14)
   const cumuAvrage = calculateAveragePercentage(impression);
-  //const cumuEngage = calculateCumulativePercentage(engagement);
+  const cumuEngage = calculateCumulativePercentage(engagement);
   const cumuAvragEngage = calculateAveragePercentage(engagement);
   const sentimentMomentum = calculateSentimentMomentum(impression);
   const sentimentMomentumPlot = calculateSentimentMomentumPlot(impression);
   const sentimentVolatility = calculateSentimentVolatility(impression);
   const weightedSentiment = calculateSentimentWeightedMetrics(impression, engagement);
   const sentimentPeaks = detectSentimentPeaks(impression);
-  console.log("Tweet Rack",tweetPerMinut)
-  const tweetFrequencyTrend = calculateTweetFrequencyTrendPercentage(tweetPerMinut, 5, 9,50);
+  const tweetFrequencyTrend = calculateTweetFrequencyTrendPercentage(tweetPerMinut, 5, 5,100);
   const sentimentTrend = calculateSentimentTrend(sentimentPlot, 30);
   const currentSentimentTrend = sentimentTrend[sentimentTrend.length - 1]?.aggregatedSentiment || 0;
   const currentTweetFrequencyTrend = tweetFrequencyTrend[tweetFrequencyTrend.length - 1]?.value || 0;
   const rawViews = avgViewsPerTweet; 
   const avgLstView = calculateAverageViewsPerTweet(tweetViewsPerFVmints.slice(-15),tweetViewsPerFVmints.slice(-15))
   
-  //console.log("AVGGGGG",avgLstView,tweetViewsPerFVmints.slice(-15),tweetViewsPerFVmints.slice(-15))
   const { count: tweetsWithAddressCount, views: tweetsWithAddressViews } = groupTweetsWithAddressByInterval(
     tweetsWithAddress,
     5
@@ -714,12 +936,25 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
     (sum, { value }) => sum + value,
     0
   );
-  const tweetsWithAddressFrequency = calculateTweetFrequencyTrendPercentage(tweetsWithAddressCount, 5, 5, 40);
+   // Determine interval based on volume
+   const dynamicInterval = impression.length > 500 ? 2 : impression.length > 200 ? 5 : 2;
+
+   // Impressions processing
+   const impressionsGrouped = calculatePoissonTrend(tweetEngagemnt); // categorizeByInterval(engagement, dynamicInterval);
+   const impressionGrowth = impressionsGrouped.length > 0
+     ? impressionsGrouped[impressionsGrouped.length - 1].value
+     : 0;
+ 
+   // Engagement processing
+   const engagementGrouped = categorizeEngagementByInterval(engagementData, dynamicInterval);
+   const engagementGrowth = calculateEngagementGrowth(engagementGrouped, dynamicInterval);
+   const engagementSeries = engagementRateSeries(engagementGrouped);
+ 
+  const tweetsWithAddressFrequency = calculateTweetFrequencyTrendPercentage(tweetsWithAddressCount, 5, 3, 80);
   const currentTweetWiAddFrequencyTrend = tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1]?.value || 0;
   const tweetwithAddAvgViews = calculateAverageViewsPerTweet(tweetsWithAddressViews, tweetsWithAddressCount);
   const tweetwithAddAvgViewsS = calculateAverageViewsPerTweet(tweetsWithAddressViews.slice(-15), tweetsWithAddressCount.slice(-15));
-  console.log("Holders",holders)
-  //console.log("Average Holders per Tweet",holders,"Live Price",live_prx)
+
   const openPopup = (title: string, data: Impression[]) => {
     setSelectedMetric({ title, data });
   };
@@ -733,13 +968,512 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   const closePopup = () => {
     setSelectedMetric(null);
     setSelectedTimeMetric(null);
-    setSelectedbarMetric(null)
+    setSelectedbarMetric(null);
   };
 
   useEffect(() => {
     Modal.setAppElement("#root");
   }, []);
-  //console.log(" SSDDDD ",NumberFormatter.formatNumber(Number(((Number(parseViewsCount(totalTweets))/avgViewsPerTweet)*100).toFixed(2))),parseViewsCount(totalTweets),avgViewsPerTweet)
+  
+  const downloadDataAsCSV = () => {
+    let csvContent = "";
+
+    // Helper to escape CSV values (handles commas, quotes, newlines)
+    const escapeCsvValue = (value: string): string => {
+        if (/[",\n]/.test(value)) {
+            return `"${value.replace(/"/g, '""')}"`;
+        }
+        return value;
+    };
+
+    // Helper to add a dataset to the CSV string
+    const addSection = (title: string, headers: string[], data: any[], rowFormatter: (item: any) => string[]) => {
+        csvContent += `${escapeCsvValue(title)}\n`;
+        csvContent += headers.map(escapeCsvValue).join(',') + '\n';
+        data.forEach(item => {
+            csvContent += rowFormatter(item).map(escapeCsvValue).join(',') + '\n';
+        });
+        csvContent += '\n'; // Add a blank line separator
+    };
+
+    // Add each dataset used in the plots, ensuring numbers are converted to strings
+    addSection(
+        "Tweet Frequency Trend (%)",
+        ["Timestamp", "Value"],
+        tweetFrequencyTrend,
+        (item: Impression) => [item.name, String(item.value)]
+    );
+
+    addSection(
+        "Tweet w/ Address Frequency (%)",
+        ["Timestamp", "Value"],
+        tweetsWithAddressFrequency,
+        (item: Impression) => [item.name, String(item.value)]
+    );
+
+    addSection(
+        "Callers/min (Raw)",
+        ["Timestamp", "Value"],
+        tweetPerMinut,
+        (item: Impression) => [item.name, String(item.value)]
+    );
+
+    addSection(
+        "Callers/5min (Grouped)",
+        ["Timestamp", "Value"],
+        tweetPerFVmints,
+        (item: Impression) => [item.name, String(item.value)]
+    );
+
+     addSection(
+        "Tweets w/ Address Count (5min Grouped)",
+        ["Timestamp", "Count"],
+        tweetsWithAddressCount,
+        (item: Impression) => [item.name, String(item.value)]
+    );
+
+    addSection(
+        "Impression Growth (Percentage Change, Smoothed)",
+        ["Timestamp", "Percentage Change"],
+        cumuImpression,
+        (item: Impression) => [item.name, String(item.value)]
+    );
+
+     addSection(
+        "Impression Growth (Grouped Avg)",
+        ["Timestamp", "Average Value"],
+        impressionsGrouped,
+        (item: Impression) => [item.name, String(item.value)]
+    );
+
+    addSection(
+        "Sentiment Trend (Smoothed)",
+        ["Timestamp", "Aggregated Sentiment"],
+        sentimentTrend,
+        (item: TimeSeries) => [item.time, String(item.aggregatedSentiment)]
+    );
+
+    addSection(
+        "Peak Sentiments (Detected on Smoothed % Change)",
+        ["Timestamp", "Value"],
+        sentimentPeaks,
+        (item: Impression) => [item.name, String(item.value)]
+    );
+
+    addSection(
+        "Average Views/Tweet (5min Grouped)",
+        ["Timestamp", "Current Views", "Previous Views (Count)"],
+        tweetViewsPerFVmints,
+        (item: CompImpression) => [item.name, String(item.value), String(item.preval)]
+    );
+
+    addSection(
+        "Views for Tweets w/ Address (5min Grouped)",
+         ["Timestamp", "Aggregated Views", "Tweet Count"],
+        tweetsWithAddressViews,
+        (item: CompImpression) => [item.name, String(item.value), String(item.preval)]
+    );
+
+    addSection(
+        "AvgTweetMade/AvgViews (Cumulative Ratio %)",
+        ["Timestamp", "Ratio (%)"],
+        tweetViewsRatioPercentage,
+        (item: Impression) => [item.name, String(item.value)]
+    );
+
+    addSection(
+        "Engagement Rate Series (Grouped)",
+        ["Timestamp", "Engagement Rate Score"],
+        engagementSeries,
+        (item: Impression) => [item.name, String(item.value)]
+    );
+
+    // Create blob and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    const safeAddress = address?.replace(/[^a-z0-9]/gi, '_') || 'unknown_address';
+    link.setAttribute("download", `metrics_data_${safeAddress}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Helper component for toggle buttons
+  const ToggleButton = ({ 
+    active, 
+    onClick, 
+    children 
+  }: { 
+    active: boolean; 
+    onClick: () => void; 
+    children: React.ReactNode 
+  }) => (
+    <button
+      className={`px-2 py-1 text-xs rounded-md transition-colors ${
+        active ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+      }`}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+
+  // Render metric cards based on active toggles
+  const renderTweetFrequencyCard = () => {
+    if (activeTweetMetric === 'frequency') {
+      return (
+        <MetricCard
+          title="Tweet Frequency Trend (%)"
+          value={tweetFrequencyTrend.length > 0 ? tweetFrequencyTrend[tweetFrequencyTrend.length - 1].value.toFixed(2) + "%" : "0%"}
+          percentageChange=""
+          subText="Frequency of tweets over time"
+          isPositiveChange={tweetFrequencyTrend.length > 0 && tweetFrequencyTrend[tweetFrequencyTrend.length - 1].value > 0}
+          graph={<LineGraph data={tweetFrequencyTrend} color="#10B981" />}
+          onClick={() => openPopup("Tweet Frequency Trend", tweetFrequencyTrend)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={true} onClick={() => setActiveTweetMetric('frequency')}>
+                Frequency
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveTweetMetric('address')}>
+                Address
+              </ToggleButton>
+            </div>
+          }
+        />
+      );
+    } else {
+      return (
+        <MetricCard
+          title="Tweet w/ Address Frequency (%)"
+          value={
+            tweetsWithAddressFrequency.length > 0
+              ? tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1].value.toFixed(2) + "%"
+              : "0%"
+          }
+          percentageChange=""
+          subText="Frequency trend for tweets with address"
+          isPositiveChange={
+            tweetsWithAddressFrequency.length > 0 &&
+            tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1].value > 0
+          }
+          graph={<LineGraph data={tweetsWithAddressFrequency} color="#34D399" />}
+          onClick={() => openPopup("Tweet w/ Address Frequency", tweetsWithAddressFrequency)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={false} onClick={() => setActiveTweetMetric('frequency')}>
+                Frequency
+              </ToggleButton>
+              <ToggleButton active={true} onClick={() => setActiveTweetMetric('address')}>
+                Address
+              </ToggleButton>
+            </div>
+          }
+        />
+      );
+    }
+  };
+
+  const renderCallersCard = () => {
+    if (activeCallerMetric === 'min') {
+      return (
+        <MetricCard
+          title="Callers/min (Avg.)"
+          value={totalTweets}
+          percentageChange={(averagePercentage > 0 ? "+" : "") + averagePercentage.toFixed(2) + "%"}
+          subText={averagePercentage.toFixed(2) + (averagePercentage > 0 ? " Increase" : " Decrease") + " in tweets/min"}
+          isPositiveChange={averagePercentage > 0}
+          graph={<LineGraph data={tweetPerMinut} color="#10B981" />}
+          onClick={() => openPopup("Callers/min (Avg.)", tweetPerMinut)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={true} onClick={() => setActiveCallerMetric('min')}>
+                Per Min
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveCallerMetric('fiveMin')}>
+                Per 5 Min
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveCallerMetric('address')}>
+                With Address
+              </ToggleButton>
+            </div>
+          }
+        />
+      );
+    } else if (activeCallerMetric === 'fiveMin') {
+      return (
+        <MetricCard
+          title="Callers/5min (Avg.)"
+          value={totalTweets}
+          percentageChange={(averagePercentageFv > 0 ? "+" : "") + averagePercentageFv.toFixed(2) + "%"}
+          subText={averagePercentageFv.toFixed(2) + (averagePercentageFv > 0 ? " Increase" : " Decrease") + " in tweets/5min"}
+          isPositiveChange={averagePercentageFv > 0}
+          graph={<LineGraph data={tweetPerFVmints} color="#10B981" />}
+          onClick={() => openPopup("Callers/5min (Avg.)", tweetPerFVmints)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={false} onClick={() => setActiveCallerMetric('min')}>
+                Per Min
+              </ToggleButton>
+              <ToggleButton active={true} onClick={() => setActiveCallerMetric('fiveMin')}>
+                Per 5 Min
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveCallerMetric('address')}>
+                With Address
+              </ToggleButton>
+            </div>
+          }
+        />
+      );
+    } else {
+      return (
+        <MetricCard
+          title="Tweets w/ Address (5min Count)"
+          value={totalTweetsWithAddress.toString()}
+          percentageChange=""
+          subText="Number of tweets with address per 5 minutes"
+          isPositiveChange={
+            tweetsWithAddressCount.length > 0 &&
+            tweetsWithAddressCount[tweetsWithAddressCount.length - 1].value > 0
+          }
+          graph={<LineGraph data={tweetsWithAddressCount} color="#60A5FA" />}
+          onClick={() => openPopup("Tweets w/ Address Count", tweetsWithAddressCount)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={false} onClick={() => setActiveCallerMetric('min')}>
+                Per Min
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveCallerMetric('fiveMin')}>
+                Per 5 Min
+              </ToggleButton>
+              <ToggleButton active={true} onClick={() => setActiveCallerMetric('address')}>
+                With Address
+              </ToggleButton>
+            </div>
+          }
+        />
+      );
+    }
+  };
+  const renderEngagementCard = () => {
+    if (activeEngagementMetric === 'growth') {
+      return (
+        <MetricCard
+          title="Impression Growth"
+          value={impressionGrowth.toFixed(2) + "%"}
+          percentageChange={(impressionGrowth >= 0 ? "+" : "") + impressionGrowth.toFixed(2) + "%"}
+          subText={`Avg. impressions per ${dynamicInterval}-minute interval`}
+          isPositiveChange={impressionGrowthPercentage >= 0}
+          graph={<BarGraph_M data={impressionsGrouped} />}
+          onClick={() => openPopup("Impression Growth", impressionsGrouped)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={true} onClick={() => setActiveEngagementMetric('growth')}>
+                Growth
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveEngagementMetric('peaks')}>
+              Engagment
+              </ToggleButton>
+              
+            </div>
+          }
+        />
+      );
+    } else {
+      return(
+        <MetricCard
+          title="Engagement Rate"
+          value={engagementGrowth.toFixed(2) + "%"}
+          percentageChange={(engagementGrowth >= 0 ? "+" : "") + engagementGrowth.toFixed(2) + "%"}
+          subText="Engagement rate analysis"
+          isPositiveChange={engagementGrowth > 0}
+          graph={<LineGraph data={engagementSeries} color="#8B5CF6" />}
+          onClick={() => openPopup("Engagement Rate", engagementSeries)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={false} onClick={() => setActiveEngagementMetric('growth')}>
+                Growth
+              </ToggleButton>
+              <ToggleButton active={true} onClick={() => setActiveEngagementMetric('peaks')}>
+                Engagment
+              </ToggleButton>
+              
+            </div>
+          }
+        />
+      );
+    }
+  }
+  const renderImpressionCard = () => {
+    if (activeImpressionMetric === 'growth') {
+      // Determine which impression growth card to show
+      if (weighBasedImpression.length > 0) {
+        return (
+          <MetricCard
+            title="Impression Growth"
+            value={isNaN(weighBasedImpression[weighBasedImpression.length-1].value) ? "0%" : weighBasedImpression[weighBasedImpression.length-1].value.toFixed(2) + "%"}
+            percentageChange={(weighBasedImpression[weighBasedImpression.length-1].value >= 0 ? "+" : "") + (isNaN(weighBasedImpression[weighBasedImpression.length-1].value) ? "0%" : weighBasedImpression[weighBasedImpression.length-1].value.toFixed(2) + "%")}
+            subText={isNaN(weighBasedImpression[weighBasedImpression.length-1].value) ? "0% change in impressions" : weighBasedImpression[weighBasedImpression.length-1].value.toFixed(2) + "% change in impressions"}
+            isPositiveChange={weighBasedImpression[weighBasedImpression.length-1].value >= 0}
+            graph={<LineGraph data={weighBasedImpression} color="#10B981" />}
+            onClick={() => openPopup("Impression Growth", weighBasedImpression)}
+            toggleControls={
+              <div className="flex space-x-2 mb-2">
+                <ToggleButton active={true} onClick={() => setActiveImpressionMetric('growth')}>
+                  Growth
+                </ToggleButton>
+                <ToggleButton active={false} onClick={() => setActiveImpressionMetric('volatility')}>
+                  Volatility
+                </ToggleButton>
+                <ToggleButton active={false} onClick={() => setActiveImpressionMetric('peaks')}>
+                  Peaks
+                </ToggleButton>
+              </div>
+            }
+          />
+        );
+      } //else {
+        
+      //}
+    } else if (activeImpressionMetric === 'volatility') {
+      return (
+        <MetricCard
+          title="Sentiment Volatility"
+          value={calculateSentimentVolatility(impression).toFixed(2)}
+          percentageChange="Variability"
+          subText="Variability in sentiment over time"
+          isPositiveChange={sentimentVolatility < 10}
+          graph={<LineGraphTimeS data={sentimentTrend} color="#F59E0B" />}
+          onClick={() => openPopupTime("Sentiment Volatility", sentimentTrend)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={false} onClick={() => setActiveImpressionMetric('growth')}>
+                Growth
+              </ToggleButton>
+              <ToggleButton active={true} onClick={() => setActiveImpressionMetric('volatility')}>
+                Volatility
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveImpressionMetric('peaks')}>
+                Peaks
+              </ToggleButton>
+            </div>
+          }
+        />
+      );
+    } else {
+      return (
+        <MetricCard
+          title="Peak Sentiments"
+          value={detectSentimentPeaks(cumuImpression).length.toString()}
+          percentageChange="Detected Peaks"
+          subText="Number of sentiment peaks detected"
+          isPositiveChange={detectSentimentPeaks(cumuImpression).length > 0}
+          graph={<LineGraph data={detectSentimentPeaks(cumuImpression)} color="#EF4444" />}
+          onClick={() => openPopup("Peak Sentiments", detectSentimentPeaks(cumuImpression))}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={false} onClick={() => setActiveImpressionMetric('growth')}>
+                Growth
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveImpressionMetric('volatility')}>
+                Volatility
+              </ToggleButton>
+              <ToggleButton active={true} onClick={() => setActiveImpressionMetric('peaks')}>
+                Peaks
+              </ToggleButton>
+            </div>
+          }
+        />
+      );
+    }
+  };
+
+  const renderViewsCard = () => {
+    if (activeViewsMetric === 'average') {
+      return (
+        <MetricCard
+          title="Avg. Views/Tweet"
+          value={NumberFormatter.formatNumber(Number(avgViewsPerTweet.toFixed(2)))}
+          percentageChange=""
+          subText="Overall average views per tweet"
+          isPositiveChange={avgViewsPerTweet >= 0}
+          graph={<BarGraph data={tweetViewsPerFVmints}/>}
+          onClick={() => openPopupBar("Average Views/Tweet", tweetViewsPerFVmints)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={true} onClick={() => setActiveViewsMetric('average')}>
+                Average
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveViewsMetric('address')}>
+                With Address
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveViewsMetric('ratio')}>
+                Ratio
+              </ToggleButton>
+            </div>
+          }
+        />
+      );
+    } else if (activeViewsMetric === 'address') {
+      return (
+        <MetricCard
+          title="Views for Tweets w/ Address (5min)"
+          value={NumberFormatter.formatNumber(Number(tweetwithAddAvgViews.toFixed(2)))}
+          percentageChange=""
+          subText="Aggregated views per 5 minutes for tweets with address"
+          isPositiveChange={
+            tweetsWithAddressViews.length > 0 &&
+            tweetsWithAddressViews[tweetsWithAddressViews.length - 1].value > 0
+          }
+          graph={<BarGraph data={tweetsWithAddressViews}  />}
+          onClick={() => openPopupBar("Views for Tweets w/ Address", tweetsWithAddressViews)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={false} onClick={() => setActiveViewsMetric('average')}>
+                Average
+              </ToggleButton>
+              <ToggleButton active={true} onClick={() => setActiveViewsMetric('address')}>
+                With Address
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveViewsMetric('ratio')}>
+                Ratio
+              </ToggleButton>
+            </div>
+          }
+        />
+      );
+    } else {
+      return (
+        <MetricCard
+          title="AvgTweetMade/AvgViews"
+          value={NumberFormatter.formatNumber(Number(((Number(parseViewsCount(totalTweets))/avgViewsPerTweet)*100).toFixed(2)))}
+          percentageChange=""
+          subText="Overall Interest of callers"
+          isPositiveChange={avgViewsPerTweet >= 0}
+          graph={<LineGraph data={tweetViewsRatioPercentage} color="#3B82F6" />}
+          onClick={() => openPopup("Average Views/Tweet", tweetViewsRatioPercentage)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={false} onClick={() => setActiveViewsMetric('average')}>
+                Average
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveViewsMetric('address')}>
+                With Address
+              </ToggleButton>
+              <ToggleButton active={true} onClick={() => setActiveViewsMetric('ratio')}>
+                Ratio
+              </ToggleButton>
+            </div>
+          }
+        />
+      );
+    }
+  };
+
   return (
     <div className="bg-gray-800 text-white rounded-lg p-4 shadow-lg w-full">
       <div id="root"></div>
@@ -778,129 +1512,45 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
           DexScreener
         </a>
       </div>
-      {/*
-      <div className="md:col-span-1 h-64 cursor-pointer" onClick={() => setShowMarketDepthModal(true)}> {/* Adjust height (h-64) as needed *//*}
-            <MarketDepthChart
-                orderBookData={holders}
-                livePriceData={live_prx}
-            />
-        </div>*/}
-      <div className="grid grid-cols-2 gap-4 h-[50vh] overflow-y-auto">
       
-      <MetricCard
-          title="Tweet Frequency Trend (%)"
-          value={tweetFrequencyTrend.length > 0 ? tweetFrequencyTrend[tweetFrequencyTrend.length - 1].value.toFixed(2) +"%": "0%"}
-          percentageChange=""
-          subText="Frequency of tweets over time"
-          isPositiveChange={tweetFrequencyTrend.length > 0 && tweetFrequencyTrend[tweetFrequencyTrend.length - 1].value > 0}
-          graph={<LineGraph data={tweetFrequencyTrend} color="#10B981" />}
-          onClick={() => openPopup("Tweet Frequency Trend", tweetFrequencyTrend)}
+      <div className="mb-4">
+        <button
+          onClick={downloadDataAsCSV}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg font-bold text-center transition duration-150 ease-in-out"
+        >
+          Download Plot Data (CSV)
+        </button>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        {renderTweetFrequencyCard()}
+        {renderCallersCard()}
+        {renderImpressionCard()}
+        {renderViewsCard()}
+        {renderEngagementCard()}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        
+        
+        
+      </div>
+
+      <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <InfoBox 
+          title="Holders" 
+          value={NumberFormatter.formatNumber(holders.length)} 
+          icon={<UsersIcon className="h-6 w-6 text-blue-400" />} 
         />
-        <MetricCard
-          title="Tweet w/ Address Frequency (%)"
-          value={
-            tweetsWithAddressFrequency.length > 0
-              ? tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1].value.toFixed(2) + "%"
-              : "0%"
-          }
-          percentageChange=""
-          subText="Frequency trend for tweets with address"
-          isPositiveChange={
-            tweetsWithAddressFrequency.length > 0 &&
-            tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1].value > 0
-          }
-          graph={<LineGraph data={tweetsWithAddressFrequency} color="#34D399" />}
-          onClick={() => openPopup("Tweet w/ Address Frequency", tweetsWithAddressFrequency)}
+        <InfoBox 
+          title="Tweet Views" 
+          value={NumberFormatter.formatNumber(rawViews)} 
+          icon={<EyeIcon className="h-6 w-6 text-green-400" />} 
         />
-        <MetricCard
-          title="Callers/min (Avg.)"
-          value={totalTweets}
-          percentageChange={(averagePercentage > 0 ? "+" : "") + averagePercentage.toFixed(2) + "%"}
-          subText={averagePercentage.toFixed(2) + (averagePercentage > 0 ? " Increase" : " Decrease") + " in tweets/min"}
-          isPositiveChange={averagePercentage > 0}
-          graph={<LineGraph data={tweetPerMinut} color="#10B981" />}
-          onClick={() => openPopup("Callers/min (Avg.)", tweetPerMinut)}
-        />
-        <MetricCard
-          title="Callers/5min (Avg.)"
-          value={totalTweets}
-          percentageChange={(averagePercentageFv > 0 ? "+" : "") + averagePercentageFv.toFixed(2) + "%"}
-          subText={averagePercentageFv.toFixed(2) + (averagePercentageFv > 0 ? " Increase" : " Decrease") + " in tweets/5min"}
-          isPositiveChange={averagePercentageFv > 0}
-          graph={<LineGraph data={tweetPerFVmints} color="#10B981" />}
-          onClick={() => openPopup("Callers/5min (Avg.)", tweetPerFVmints)}
-        />
-        <MetricCard
-          title="Tweets w/ Address (5min Count)"
-          value={
-            totalTweetsWithAddress.toString()
-          }
-          percentageChange=""
-          subText="Number of tweets with address per 5 minutes"
-          isPositiveChange={
-            tweetsWithAddressCount.length > 0 &&
-            tweetsWithAddressCount[tweetsWithAddressCount.length - 1].value > 0
-          }
-          graph={<LineGraph data={tweetsWithAddressCount} color="#60A5FA" />}
-          onClick={() => openPopup("Tweets w/ Address Count", tweetsWithAddressCount)}
-        />
-        <MetricCard
-          title="Impression Growth"
-          value={impressionGrowthPercentage.toFixed(2) + "%"}
-          percentageChange={(impressionGrowthPercentage >= 0 ? "+" : "") + impressionGrowthPercentage.toFixed(2) + "%"}
-          subText={impressionGrowthPercentage.toFixed(2) + "% change in impressions"}
-          isPositiveChange={impressionGrowthPercentage >= 0}
-          graph={<LineGraph data={cumuImpression} color="#10B981" />}
-          onClick={() => openPopup("Impression Growth", cumuImpression)}
-        />
-        <MetricCard
-          title="Sentiment Volatility"
-          value={calculateSentimentVolatility(impression).toFixed(2)}
-          percentageChange="Variability"
-          subText="Variability in sentiment over time"
-          isPositiveChange={sentimentVolatility < 10}
-          graph={<LineGraphTimeS data={sentimentTrend} color="#F59E0B" />}
-          onClick={() => openPopupTime("Sentiment Volatility", sentimentTrend)}
-        />
-        <MetricCard
-          title="Peak Sentiments"
-          value={detectSentimentPeaks(impression).length.toString()}
-          percentageChange="Detected Peaks"
-          subText="Number of sentiment peaks detected"
-          isPositiveChange={detectSentimentPeaks(impression).length > 0}
-          graph={<LineGraph data={detectSentimentPeaks(impression)} color="#EF4444" />}
-          onClick={() => openPopup("Peak Sentiments", detectSentimentPeaks(impression))}
-        />
-        <MetricCard
-          title="Avg. Views/Tweet"
-          value={NumberFormatter.formatNumber(Number(avgViewsPerTweet.toFixed(2)))}
-          percentageChange=""
-          subText="Overall average views per tweet"
-          isPositiveChange={avgViewsPerTweet >= 0}
-          graph={<BarGraph data={tweetViewsPerFVmints}/>}
-          onClick={() => openPopupBar("Average Views/Tweet", tweetViewsPerFVmints)}
-        />
-        <MetricCard
-            title="Views for Tweets w/ Address (5min)"
-            value={NumberFormatter.formatNumber(Number(tweetwithAddAvgViews.toFixed(2)))}
-              
-            percentageChange=""
-            subText="Aggregated views per 5 minutes for tweets with address"
-            isPositiveChange={
-              tweetsWithAddressViews.length > 0 &&
-              tweetsWithAddressViews[tweetsWithAddressViews.length - 1].value > 0
-            }
-            graph={<BarGraph data={tweetsWithAddressViews}  />}
-            onClick={() => openPopupBar("Views for Tweets w/ Address", tweetsWithAddressViews)}
-          />
-          <MetricCard
-          title="AvgTweetMade/AvgViews"
-          value={NumberFormatter.formatNumber(Number(((Number(parseViewsCount(totalTweets))/avgViewsPerTweet)*100).toFixed(2)))}
-          percentageChange=""
-          subText="Overall Interest of callers"
-          isPositiveChange={avgViewsPerTweet >= 0}
-          graph={<LineGraph data={tweetViewsRatioPercentage} color="#3B82F6" />}
-          onClick={() => openPopup("Average Views/Tweet", tweetViewsRatioPercentage)}
+        <InfoBox 
+          title="Live PRX" 
+          value={NumberFormatter.formatNumber(live_prx.length)} 
+          icon={<SignalIcon className="h-6 w-6 text-purple-400" />} 
         />
       </div>
       <div className="flex flex-col justify-center items-center h-screen">
