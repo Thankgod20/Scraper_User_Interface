@@ -15,7 +15,7 @@ export class CustomDataFeed implements IDataFeed {
       volume: (entry.volume),
     }));
     data_ = this.data;
-    console.log("Time Sampt",data_)
+    //console.log("Time Sampt",data_)
     symbol_ = symbol + "/USDT";
     address_ =address
   }
@@ -80,14 +80,14 @@ export class CustomDataFeed implements IDataFeed {
     const bars = data_.filter(
       (bar) => bar.time >= from  * 1000 && bar.time <= to * 1000
     );
-    console.log("resolution", bars,bars.length); 
+    //console.log("resolution", bars,bars.length); 
     //1742843517 
     //1742848740
     if (bars.length) {
-      console.log("bars===", from, to);
+      //console.log("bars===", from, to);
       onHistoryCallback(bars, { noData: false });
     } else {
-      console.log("bars x===", from, to);
+      //console.log("bars x===", from, to);
       onHistoryCallback([], { noData: true });
     }
   }
@@ -291,7 +291,7 @@ export class CustomDataFeed implements IDataFeed {
   
       // Minute update: fetch two bars from the API every minute
       const minuteIntervalId = setInterval(() => {
-        console.log("Fetching latest bars from API...");
+        //console.log("Fetching latest bars from API...");
   
         fetch('/api/live', {
           method: 'POST',
@@ -326,8 +326,8 @@ export class CustomDataFeed implements IDataFeed {
                 volume: currData[5],
               };
   
-              console.log("Fetched replaced bar:", replacedBar);
-              console.log("Fetched new bar:", fetchedNewBar);
+              //console.log("Fetched replaced bar:", replacedBar);
+              //console.log("Fetched new bar:", fetchedNewBar);
   
               // Clear the simulation for the current new candle so it can be replaced
               clearInterval(simulationIntervalId);

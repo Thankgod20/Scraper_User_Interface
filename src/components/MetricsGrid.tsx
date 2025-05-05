@@ -12,6 +12,9 @@ import BarGraph from './BarChar';
 import BarGraph_Main from './BarChar_Main';
 import BarGraph_M from './BarChar_';
 import MarketDepthChart from './MarketDepth';
+import MACDChart from './MacD';
+import RSIChart from './RSIChart';
+import MACDMainChart from './MacDMain';
 import { Signal as SignalIcon, Users as UsersIcon, Eye as EyeIcon } from 'lucide-react';
 
 //import BarChartCard from './BarChartCard';
@@ -51,12 +54,14 @@ interface Engagement {
   retweets: number;
   comments: number;
   followers: number;
+  count: number;
 }
 interface EngagementImpression {
   name: string;
   impression: number;
   views: number;
   volume: number;
+  
 }
 interface MetricGridProps {
   address: any;
@@ -72,6 +77,12 @@ interface MetricGridProps {
   tweetsWithAddress: { tweet: string; views: number; likes: number; timestamp: string }[];
   holders: {amount: number;price: number; time:string}[]
   live_prx: RawTradeData[]
+}
+interface MetricsBin {
+  time: string;   // ISO timestamp of the bin, e.g. "2025-05-01T10:00:00.000Z"
+  sei: number;    // Social Engagement Index at this bin
+  res: number;    // Relative Engagement Spike at this bin
+  views: number;  // Total views in this bin
 }
 interface Props {
   children?: React.ReactNode;
@@ -117,7 +128,580 @@ const MetricCard: React.FC<MetricCardProps> = ({
 };
 
 // ----------------- New Helper Functions -----------------
+interface MACDPoint {
+  name: string;       // timestamp label, e.g. "10:00"
+  macd: number;       // MACD line value
+  signal: number;     // Signal line value
+  histogram: number;  // Histogram bar value
+}
 
+
+
+/**
+ * Computes MACD, Signal, and Histogram for a FOMO time series.
+ *
+ * @param data   Array of FOMOPoint sorted by time ascending
+ * @param spanFast   Fast EMA period (default 12)
+ * @param spanSlow   Slow EMA period (default 26)
+ * @param spanSignal Signal EMA period (default 9)
+ */
+function computeMACD(
+  data: Impression[],
+  spanFast = 9,
+  spanSlow = 14,
+  spanSignal = 9
+): MACDPoint[] {
+  const α = (n: number) => 2 / (n + 1);
+
+  const emaFast: number[] = [];
+  const emaSlow: number[] = [];
+  const macdLine: number[] = [];
+  const signalLine: number[] = [];
+
+  for (let i = 0; i < data.length; i++) {
+    const price = data[i].value;
+
+    // Fast EMA
+    if (i === 0) {
+      emaFast[i] = price;
+      emaSlow[i] = price;
+    } else {
+      emaFast[i] = α(spanFast) * price + (1 - α(spanFast)) * emaFast[i - 1];
+      emaSlow[i] = α(spanSlow) * price + (1 - α(spanSlow)) * emaSlow[i - 1];
+    }
+
+    // MACD line
+    macdLine[i] = emaFast[i] - emaSlow[i];
+
+    // Signal line (on MACD)
+    if (i === 0) {
+      signalLine[i] = macdLine[i];
+    } else {
+      signalLine[i] =
+        α(spanSignal) * macdLine[i] + (1 - α(spanSignal)) * signalLine[i - 1];
+    }
+  }
+
+  // Build the output
+  return data.map((pt, i) => ({
+    name: pt.name,
+    macd: macdLine[i],
+    signal: signalLine[i],
+    histogram: macdLine[i] - signalLine[i],
+  }));
+}
+function computeImpressionsTimeSeries(
+  tweets: Engagement[],
+  intervalMinutes: number = 15,
+  K: number = 10000,
+  N_baseline: number = 100
+): Impression[] {
+  if (tweets.length === 0) return [];
+
+  // Sort tweets by timestamp
+  const sortedTweets = [...tweets].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+
+  const intervalMs = intervalMinutes * 60 * 1000;
+  const startTime = new Date(sortedTweets[0].timestamp).getTime();
+  const endTime = new Date(sortedTweets[sortedTweets.length - 1].timestamp).getTime();
+  const intervals: Impression[] = [];
+
+  for (let t = startTime; t <= endTime; t += intervalMs) {
+    const intervalStart = t;
+    const intervalEnd = t + intervalMs;
+
+    const bucketTweets = sortedTweets.filter((tweet) => {
+      const tweetTime = new Date(tweet.timestamp).getTime();
+      return tweetTime >= intervalStart && tweetTime < intervalEnd;
+    });
+
+    const N = bucketTweets.length;
+    if (N === 0) continue;
+
+    let totalQAI = 0;
+    for (const tweet of bucketTweets) {
+      const { likes, comments, retweets, impressions, followers } = tweet;
+
+      const rawEngagement = likes + comments + 2*retweets + 0.5 * impressions;
+      const spamPenalty = (likes + comments + 2*retweets+0.5 * impressions) / (followers + 1);
+      const influenceCap = Math.tanh(followers / K);
+
+      const qai = rawEngagement * spamPenalty * influenceCap;
+      totalQAI += qai;
+    }
+
+    const volumeScaling = Math.log(1 + (N / N_baseline));
+    const adjustedQAI = totalQAI * volumeScaling;
+
+    intervals.push({
+      name: new Date(intervalStart).toLocaleString(),
+      value: adjustedQAI,
+    });
+  }
+
+  return intervals;
+}
+interface Impression { name: string; value: number; }
+interface RSIPoint  { name: string; rsi: number; }
+
+function computeRSI(
+  data: Impression[],
+  period = 14
+): Impression[] {
+  const rsiPoints: Impression[] = [];
+  if (data.length < period + 1) return rsiPoints;
+
+  // Arrays to hold U and D values
+  const gains: number[] = [];
+  const losses: number[] = [];
+
+  // 1. Compute raw gains and losses for each period
+  for (let i = 1; i < data.length; i++) {
+    const change = data[i].value - data[i - 1].value;
+    gains[i]  = Math.max(change,  0);
+    losses[i] = Math.max(-change, 0);
+  }
+
+  // 2. Initialize first smoothed averages (simple mean)
+  let avgGain = gains.slice(1, period + 1).reduce((a, b) => a + b, 0) / period;
+  let avgLoss = losses.slice(1, period + 1).reduce((a, b) => a + b, 0) / period;
+
+  // 3. Compute first RSI value at index = period
+  let rs = avgGain / avgLoss;
+  rsiPoints.push({
+    name: data[period].name,
+    value: 100 - (100 / (1 + rs)),
+  });
+
+  // 4. Wilder’s smoothing for subsequent values
+  for (let i = period + 1; i < data.length; i++) {
+    avgGain = (avgGain * (period - 1) + gains[i]) / period;
+    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+    rs      = avgGain / avgLoss;
+
+    rsiPoints.push({
+      name: data[i].name,
+      value: 100 - (100 / (1 + rs)),
+    });
+  }
+
+  return rsiPoints;
+}
+
+/**
+ * Computes the Composite FOMO Index for each time bin:
+ *   FOMO_Index(t) = (Z_SEI + Z_RES + Z_Views) / 3
+ *
+ * where Z_metric = (metric - μ) / σ.
+ *
+ * @param bins  Array of MetricsBin, sorted by time.
+ * @returns     Array of FOMOIndexResult with the same time ordering.
+ */
+function computeCompositeFOMOIndex(
+  bins: MetricsBin[]
+): Impression[] {
+  const n = bins.length;
+  if (n === 0) return [];
+
+  // Helper to compute mean and std
+  const mean = (arr: number[]) => arr.reduce((s, x) => s + x, 0) / arr.length;
+  const std = (arr: number[], mu: number) =>
+    Math.sqrt(arr.reduce((s, x) => s + (x - mu) ** 2, 0) / arr.length);
+
+  // Extract arrays
+  const seis   = bins.map(b => b.sei);
+  const ress   = bins.map(b => b.res);
+  const viewsA = bins.map(b => b.views);
+
+  // Compute statistics
+  const μ_sei   = mean(seis);
+  const σ_sei   = std(seis, μ_sei)   || 1;  // avoid div0
+  const μ_res   = mean(ress);
+  const σ_res   = std(ress, μ_res)   || 1;
+  const μ_views = mean(viewsA);
+  const σ_views = std(viewsA, μ_views) || 1;
+
+  // Build the composite index series
+  return bins.map(({ time, sei, res, views }) => {
+    const zSei   = (sei   - μ_sei)   / σ_sei;
+    const zRes   = (res   - μ_res)   / σ_res;
+    const zViews = (views - μ_views) / σ_views;
+
+    return {
+      name: time,
+      value: (zSei + zRes + zViews) / 3
+    };
+  });
+}
+/**
+ * 1) Buckets raw tweets into fixed-interval bins.
+ * 2) Computes SEI, views.
+ * 3) Computes RES over a rolling window of `resWindow` bins.
+ */
+function computeMetricsBins(
+  tweets: Engagement[],
+  intervalMinutes: number,
+  resWindow: number
+): MetricsBin[] {
+  if (tweets.length === 0) return [];
+
+  const bucketMs = intervalMinutes * 60 * 1000;
+
+  // Step 1: aggregate into bins
+  type BinAgg = { sumEng: number; sumViews: number; count: number };
+  const bins = new Map<number, BinAgg>();
+
+  for (const { timestamp, likes, retweets, comments, followers, impressions } of tweets) {
+    const tMs = new Date(timestamp).getTime();
+    const floored = Math.floor(tMs / bucketMs) * bucketMs;
+
+    // engagement E = likes + 2*retweets + comments
+    const eng = (likes + 2 * retweets + comments) * Math.log(followers + 1);
+
+    const agg = bins.get(floored) ?? { sumEng: 0, sumViews: 0, count: 0 };
+    agg.sumEng   += eng;
+    agg.sumViews += impressions;
+    agg.count    += 1;
+    bins.set(floored, agg);
+  }
+
+  // step 2: sort and compute SEI & views per bin
+  const sorted = Array.from(bins.entries())
+    .map(([timeMs, { sumEng, sumViews, count }]) => ({
+      timeMs,
+      sei: sumEng / count,
+      views: sumViews,
+      count
+    }))
+    .sort((a, b) => a.timeMs - b.timeMs);
+
+  // step 3: compute RES = (E - MA)/MA over the last resWindow bins
+  const results: MetricsBin[] = [];
+  const engSeries = sorted.map(b => b.sei * sorted[0].count); // rebuild raw E for RES MA
+  // actually, for RES we want raw engagement sum: use sumEng directly, so reconstruct array:
+  const rawEng = Array.from(bins.entries())
+    .map(([timeMs, agg]) => ({ timeMs, eng: agg.sumEng }))
+    .sort((a, b) => a.timeMs - b.timeMs)
+    .map(x => x.eng);
+
+  for (let i = 0; i < sorted.length; i++) {
+    const { timeMs, sei, views } = sorted[i];
+    let res = 0;
+    if (i >= resWindow) {
+      // moving average over previous resWindow bins
+      const window = rawEng.slice(i - resWindow, i);
+      const ma = window.reduce((sum, x) => sum + x, 0) / window.length;
+      res = ma > 0 ? (rawEng[i] - ma) / ma : 0;
+    }
+    results.push({
+      time: new Date(timeMs).toLocaleString(),
+      sei,
+      res,
+      views
+    });
+  }
+
+  return results;
+}
+/**
+ * Buckets impressions into fixed intervals, computes SEI, Velocity, and FOMO.
+ *
+ * @param data             Array of raw EngagementImpression
+ * @param intervalMinutes  Bin size in minutes (e.g. 5)
+ * @param alpha            EWMA smoothing factor for Velocity (0<alpha<=1)
+ * @returns                Array of { time, fomo } sorted by time
+ */
+function computeTimeBasedFOMO(
+  data: Engagement[],
+  intervalMinutes: number,
+  alpha: number,
+  K = 5000
+): Impression[] {
+  if (data.length === 0) return [];
+
+  const bucketMs = intervalMinutes * 60 * 1000;
+  type Bin = {
+    weightedSEI: number;
+    views: number;
+    count: number;
+  };
+  const bins = new Map<number, Bin>();
+
+  // 1) Bucket raw data using SEI logic
+  for (const { timestamp, likes, retweets, comments, impressions, followers } of data) {
+    const tMs = new Date(timestamp).getTime();
+    const floored = Math.floor(tMs / bucketMs) * bucketMs;
+    const bin = bins.get(floored) ?? { weightedSEI: 0, views: 0, count: 0 };
+
+    const rawEngagement = likes + 2 * retweets + comments + 0.5 * impressions;
+    const weightedEngagement =
+      rawEngagement * (rawEngagement / (followers + 1)) * Math.tanh(followers / K);
+
+    bin.weightedSEI += weightedEngagement;
+    bin.views += impressions;
+    bin.count += 1;
+    bins.set(floored, bin);
+  }
+
+  // 2) Convert to sorted array
+  const sorted = Array.from(bins.entries())
+    .map(([timeMs, { weightedSEI, views, count }]) => ({
+      timeMs,
+      sei: weightedSEI / count,
+      avgViews: views / count
+    }))
+    .sort((a, b) => a.timeMs - b.timeMs);
+
+  // 3) Normalize views
+  const maxViews = Math.max(...sorted.map((b) => b.avgViews), 1);
+
+  // 4) Compute Velocity (EWMA) and FOMO
+  const results: Impression[] = [];
+  let prevEWMA = 0;
+  let prevSEI = 0;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const { timeMs, sei, avgViews } = sorted[i];
+
+    const rawVel = i === 0 ? 0 : (sei - prevSEI) / intervalMinutes;
+    const vel = i === 0 ? rawVel : alpha * rawVel + (1 - alpha) * prevEWMA;
+
+    const fomo = sei * vel * (1 + avgViews / maxViews);
+
+    results.push({ name: new Date(timeMs).toLocaleString(), value: fomo });
+
+    prevEWMA = vel;
+    prevSEI = sei;
+  }
+
+  // 5) Normalize FOMO values to [0, 1] using min-max scaling
+  const allFomoValues = results.map((r) => r.value);
+  const minValue = Math.min(...allFomoValues);
+  const maxValue = Math.max(...allFomoValues);
+  const range = maxValue - minValue;
+
+  const normalizedResults = results.map((r) => {
+    const normalizedValue = range === 0 ? 0 : (r.value - minValue) / range;
+    return {
+      name: r.name,
+      value: normalizedValue
+    };
+  });
+
+  return normalizedResults;
+}
+/**
+ * Buckets tweets into fixed-interval bins and computes SEI per bin.
+ *
+ * @param tweets           Array of Tweet objects
+ * @param intervalMinutes  Bin size in minutes (e.g. 5)
+ * @returns                Array of { time, sei } sorted by time
+ */
+function followerFactor(followers: number, F0 = 10000, k = 0.001): number {
+  return 1 / (1 + Math.exp(-k * (followers - F0)));
+}
+function computeTimeBasedSEI(
+  tweets: Engagement[],
+  intervalMinutes: number
+): Impression[] {
+  if (tweets.length === 0) return [];
+    
+  const bucketMs = intervalMinutes * 60 * 1000;
+  // Map<bucketTimestampMs, { sumWeighted: number, count: number }>
+  const bins = new Map<number, { sumWeighted: number; count: number }>();
+
+  for (const { timestamp, likes, retweets, comments, impressions,followers } of tweets) {
+    
+    const tMs = new Date(timestamp).getTime();
+    const floored = Math.floor(tMs / bucketMs) * bucketMs;
+    const weight = ((likes + 2 * retweets + comments+0.5*impressions)) *((likes+2*retweets+comments+0.5*impressions)/(followers+1)) * Math.tanh(followers/10000);
+
+    const prev = bins.get(floored);
+    if (prev) {
+      prev.sumWeighted += weight;
+      prev.count += 1;
+    } else {
+      bins.set(floored, { sumWeighted: weight, count: 1 });
+    }
+  }
+ 
+  
+  // Convert to sorted array and compute SEI = sumWeighted / count
+  return Array.from(bins.entries())
+    .map(([timeMs, { sumWeighted, count }]) => ({
+      name: new Date(timeMs).toLocaleString(),
+      value: ((sumWeighted / count)),
+    }))
+    .sort((a, b) => (a.name < b.name ? -1 : 1));
+}
+function computeSEIEMA(data: Impression[], period: number): Impression[] {
+  if (data.length === 0 || period <= 0) return [];
+
+  const k = 2 / (period + 1);
+  const emaArray: Impression[] = [];
+
+  let emaPrev = data[0].value;
+  emaArray.push({ name: data[0].name, value: emaPrev });
+
+  for (let i = 1; i < data.length; i++) {
+    const currentValue = data[i].value;
+    const emaCurrent = currentValue * k + emaPrev * (1 - k);
+    emaArray.push({ name: data[i].name, value: emaCurrent });
+    emaPrev = emaCurrent;
+  }
+
+  return emaArray;
+}
+
+function computeOscillatingSEIVelocity(
+  seiData: Impression[],
+  tweets: Engagement[],
+  intervalMinutes: number,
+  tau: number = 15, // EMA period in minutes
+  lambda: number = 2.5, // Whale booster amplification factor
+  engagementBase: number = 100, // Normalization constant
+  epsilon: number = 0.01 // Small constant to prevent division by zero
+): Impression[] {
+  const n = seiData.length;
+  if (n < 3) return [];
+
+  // Helper functions
+  const median = (arr: number[]) => {
+    const sorted = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 !== 0
+      ? sorted[mid]
+      : (sorted[mid - 1] + sorted[mid]) / 2;
+  };
+
+  const mad = (arr: number[], med: number) =>
+    median(arr.map((v) => Math.abs(v - med)));
+
+  // Compute EMA of SEI
+  const alpha = 2 / (tau + 1);
+  const emaSEI: number[] = [];
+  seiData.forEach((d, i) => {
+    if (i === 0) {
+      emaSEI.push(d.value);
+    } else {
+      emaSEI.push(alpha * d.value + (1 - alpha) * emaSEI[i - 1]);
+    }
+  });
+
+  // Compute median and MAD of SEI
+  const seiValues = seiData.map((d) => d.value);
+  const seiMedian = median(seiValues);
+  const seiMAD = mad(seiValues, seiMedian) + epsilon;
+
+  // Compute Whale Engagement per interval
+  const bucketMs = intervalMinutes * 60 * 1000;
+  const whaleEngagementMap = new Map<number, number>();
+
+  tweets.forEach(({ timestamp, likes, retweets, followers }) => {
+    const tMs = new Date(timestamp).getTime();
+    const floored = Math.floor(tMs / bucketMs) * bucketMs;
+    if (followers > 10000) {
+      const engagement = likes + retweets;
+      whaleEngagementMap.set(
+        floored,
+        (whaleEngagementMap.get(floored) || 0) + engagement
+      );
+    }
+  });
+
+  // Compute Enhanced SEI Velocity
+  const velocityData: Impression[] = [];
+
+  for (let i = 2; i < n; i++) {
+    const tMs = new Date(seiData[i].name).getTime();
+    const currentSEI = seiData[i].value;
+    const ema = emaSEI[i];
+
+    // Robust Z-Score
+    const zRobust = (currentSEI - ema) / seiMAD;
+
+    // Acceleration Gate
+    const accel =
+      seiData[i].value - 2 * seiData[i - 1].value + seiData[i - 2].value;
+    const gate = Math.max(0, accel);
+
+    // Whale Booster
+    const whaleEngagement = whaleEngagementMap.get(tMs) || 0;
+    const whaleBoost = lambda * Math.tanh(whaleEngagement / engagementBase);
+
+    // Enhanced SEI Velocity
+    const velocity = zRobust * gate * (1 + whaleBoost);
+
+    velocityData.push({
+      name: seiData[i].name,
+      value: velocity,
+    });
+  }
+
+  // Apply Fisher Transform to enhance oscillations
+  const fisherTransformedData: Impression[] = [];
+  for (let i = 0; i < velocityData.length; i++) {
+    const v = velocityData[i].value;
+
+    // Normalize velocity to range (-0.99, 0.99) to avoid infinity in Fisher Transform
+    const scaled = Math.max(-0.99, Math.min(0.99, v / (Math.abs(v) + 1)));
+
+    // Fisher Transform
+    const fisher = 0.5 * Math.log((1 + scaled) / (1 - scaled));
+
+    fisherTransformedData.push({
+      name: velocityData[i].name,
+      value: fisher,
+    });
+  }
+
+  return fisherTransformedData;
+}
+function mean(xs: number[]): number {
+  return xs.reduce((a, b) => a + b, 0) / xs.length;
+}
+
+function stddev(xs: number[], mu: number): number {
+  const sumSq = xs.reduce((s, x) => s + (x - mu) ** 2, 0);
+  return Math.sqrt(sumSq / xs.length);
+}
+function computeVelocities(imps: Impression[]): Impression[] {
+  const vels: { name: string; value: number }[] = [];
+
+  for (let i = 1; i < imps.length; i++) {
+    const prev = imps[i - 1];
+    const curr = imps[i];
+
+    const tPrev = new Date(prev.name).getTime();
+    const tCurr = new Date(curr.name).getTime();
+    const dtMinutes = (tCurr - tPrev) / 1000 / 60;      // Δtime in minutes
+
+    // ΔSEI
+    const dSEI = curr.value - prev.value;
+
+    // velocity: change per minute
+    const velocity = dSEI / dtMinutes;
+
+    vels.push({ name: curr.name, value:velocity });
+  }
+
+  return vels;
+}
+
+function getDynamicSpikes(
+  imps: Impression[],
+  sigmaThreshold = 0.3
+): Impression[] {
+  const velocities = computeVelocities(imps);
+  const vals = velocities.map(v => v.value);
+  const μ = mean(vals);
+  const σ = stddev(vals, μ);
+  const cutoff = μ + sigmaThreshold * σ;
+
+  return velocities.filter(v => v.value >= cutoff);
+}
 /**
  * Calculate tweet growth based on grouped data.
  * Computes the average tweet count per interval and normalizes it
@@ -155,6 +739,89 @@ function calculateImpressionGrowth(impressionData: Impression[]): number {
   
   // If no valid pairs were found, return 0.
   return validPairs === 0 ? 0 : totalPercentChange / validPairs;
+}
+/**
+ * Aggregates raw engagement into fixed-interval bins and computes EWMA.
+ *
+ * @param data            Array of EngagementImpression
+ * @param intervalMinutes Bin size in minutes (e.g. 5)
+ * @param alpha           Smoothing factor in (0,1]
+ * @returns               Array of {time, ewma} sorted by time
+ */
+function computeTimeBasedEWMA(
+  data: EngagementImpression[],
+  intervalMinutes: number,
+  alpha: number
+): Impression[] {
+  if (data.length === 0) return [];
+
+  const bucketMs = intervalMinutes * 60 * 1000;
+  const bins = new Map<number, number>();
+
+  // 1) Bucket into Map<bucketTimestampMs, sumImpressions>
+  for (const { name, impression } of data) {
+    const tMs = new Date(name).getTime();
+    const floored = Math.floor(tMs / bucketMs) * bucketMs;
+    bins.set(floored, (bins.get(floored) ?? 0) + impression);
+  }
+
+  // 2) Sort buckets by time
+  const sorted = Array.from(bins.entries())
+    .map(([timeMs, sum]) => ({ timeMs, sum }))
+    .sort((a, b) => a.timeMs - b.timeMs);
+
+  // 3) Compute EWMA in one pass, outputting ISO strings
+  const result: Impression[] = [];
+  let prevEWMA = sorted[0].sum;
+  result.push({
+    name: new Date(sorted[0].timeMs).toLocaleString(),
+    value: prevEWMA,
+  });
+
+  for (let i = 1; i < sorted.length; i++) {
+    const curr = sorted[i].sum;
+    const ewma = alpha * curr + (1 - alpha) * prevEWMA;
+    result.push({
+      name: new Date(sorted[i].timeMs).toLocaleString(),
+      value: ewma,
+    });
+    prevEWMA = ewma;
+  }
+
+  return result;
+}
+// 3. Compute engagement velocity
+//    V(t_i) = (E(t_i) - E(t_{i-1})) / Δt
+// Here Δt is implied as one interval between successive array elements.
+function computeVelocity(
+  arr: EngagementImpression[],
+  windowSize: number
+): Impression[] {
+  const velocities: Impression[] = [];
+  if (arr.length <= windowSize) return velocities;
+
+  for (let i = windowSize; i < arr.length; i++) {
+    // parse the two timestamps
+    const tCurr = new Date(arr[i].name).getTime();
+    const tPrev = new Date(arr[i - windowSize].name).getTime();
+
+    // compute ΔE
+    const deltaE = arr[i].impression - arr[i - windowSize].impression;
+
+    // Δt in minutes
+    const deltaT = (tCurr - tPrev) / 1000 / 60;
+    if (deltaT === 0) continue; // avoid divide-by-zero
+
+    // velocity in impressions per minute
+    const v = deltaE / deltaT;
+
+    velocities.push({
+      name: arr[i].name,
+      value: v,
+    });
+  }
+
+  return velocities;
 }
 
 function calculateImpressionPlot(
@@ -665,7 +1332,7 @@ const groupTweetsWithAddressByInterval = (
     const time = new Date(item.timestamp);
     const msInInterval = intervalMinutes * 60 * 1000;
     const roundedTime = new Date(Math.floor(time.getTime() / msInInterval) * msInInterval);
-    const key = roundedTime.toISOString();
+    const key = roundedTime.toLocaleString();
 
     if (!intervalMapCount[key]) {
       intervalMapCount[key] = 0;
@@ -714,7 +1381,6 @@ function parseISOLocal(s:any) {
   return new Date(year, month - 1, day, hour, minute, second);
 }
 interface Impression { name: string; value: number; }
-
 // Helper: group raw Impression data into dynamic-minute intervals
 function categorizeByInterval(
   data: Impression[],
@@ -799,6 +1465,7 @@ function categorizeEngagementByInterval(
         retweets: 0,
         comments: 0,
         followers: d.followers,
+        count: d.count,
       };
     }
 
@@ -809,6 +1476,7 @@ function categorizeEngagementByInterval(
     bucket.comments    += d.comments;
     // overwrite followers so it's always the most recent in that bucket
     bucket.followers    = d.followers;
+    bucket.count       += d.count;
   });
 
   return Object.values(map)
@@ -845,8 +1513,8 @@ function calculateEngagementGrowth(data: Engagement[], intervalMinutes: number, 
 function engagementRateSeries(data: Engagement[]): Impression[] {
   return data.map(d => {
     const score =
-      (d.impressions * 0.05 + d.likes * 0.25 + d.retweets * 0.5 + d.comments * 0.2) /
-      (d.followers > 0 ? d.followers : 1);
+      ((d.impressions * 0.1 + d.likes * 0.3 + d.retweets * 0.4 + d.comments * 0.2) /
+      (d.followers > 0 ? d.followers : 1));
     return { name: d.timestamp, value: score };
   });
 }
@@ -869,13 +1537,16 @@ const InfoBox: React.FC<InfoBoxProps> = ({ title, value, icon }) => {
 };
 
 const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetPerMinut, impression, engagementData, tweetEngagemnt, engagement, tweetViews, sentimentPlot, tweetsWithAddress, holders, live_prx }) => {
-  
+  //console.log('tweet Enagament',tweetEngagemnt," engagementData",engagementData)
   let twt = `https://x.com/search?q=${address}`;
   if (twitter != null) {
     twt = twitter;
   }
   const [selectedMetric, setSelectedMetric] = useState<{ title: string; data: Impression[] | null } | null>(null);
+  const [selectedRSIMetric, setSelectedRSIMetric] = useState<{ title: string; data: Impression[] | null } | null>(null);
+  //setSelectedRSIMetric
   const [selectedTimeMetric, setSelectedTimeMetric] = useState<{ title: string; data: TimeSeries[] | null } | null>(null);
+  const [selectedMacDMetric, setSelectedMacDMetric] = useState<{ title: string; data: MACDPoint[] | null } | null>(null);
   const [selectedbarMetric, setSelectedbarMetric] = useState<{ title: string; data: Impression[] | null } | null>(null);
   const [showMarketDepthModal, setShowMarketDepthModal] = useState(false);
 
@@ -884,6 +1555,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   const [activeCallerMetric, setActiveCallerMetric] = useState<'min' | 'fiveMin' | 'address'>('min');
   const [activeImpressionMetric, setActiveImpressionMetric] = useState<'growth' | 'volatility' | 'peaks'>('growth');
   const [activeEngagementMetric, setActiveEngagementMetric] = useState<'growth' | 'peaks'>('growth');
+  const [activeFomoMetric, setActiveFomoMetric] = useState<'growth' | 'peaks' | 'macd'>('growth');
   const [activeViewsMetric, setActiveViewsMetric] = useState<'average' | 'address' | 'ratio'>('average');
   
   const totalTweets_ = tweetPerMinut.reduce((sum, tweet) => sum + tweet.value, 0);
@@ -912,7 +1584,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   const averagePercentageFv = calculateAveragePercentage(tweetPerFVmints);
   const averagePercentage = calculateAveragePercentage(tweetPerMinut);
   const cumuImpression = calculateImpressionPercentage(impression);
-  const weighBasedImpression = calculateImpressionPlot(tweetEngagemnt,14)
+  const weighBasedImpression = computeImpressionsTimeSeries(engagementData,5)//calculateImpressionPlot(tweetEngagemnt,9)
   const cumuAvrage = calculateAveragePercentage(impression);
   const cumuEngage = calculateCumulativePercentage(engagement);
   const cumuAvragEngage = calculateAveragePercentage(engagement);
@@ -944,7 +1616,14 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
    const impressionGrowth = impressionsGrouped.length > 0
      ? impressionsGrouped[impressionsGrouped.length - 1].value
      : 0;
- 
+    const computVelocity = computeVelocity(tweetEngagemnt,15);
+    const EWMA_Value = computeSEIEMA(weighBasedImpression,14)//computeTimeBasedEWMA(tweetEngagemnt, 14,0.3);
+    const SEI_value_x = computeTimeBasedSEI(engagementData,5)
+    const SEI_EMA = computeSEIEMA(SEI_value_x,14)
+    const SEI_Velocity = computeOscillatingSEIVelocity(SEI_value_x,engagementData,15);
+    //console.log("Engagement Data",SEI_value_x)
+    const SEI_value= getDynamicSpikes(SEI_value_x)
+    //console.log("Engagement Data xxx",SEI_value)
    // Engagement processing
    const engagementGrouped = categorizeEngagementByInterval(engagementData, dynamicInterval);
    const engagementGrowth = calculateEngagementGrowth(engagementGrouped, dynamicInterval);
@@ -954,12 +1633,24 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   const currentTweetWiAddFrequencyTrend = tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1]?.value || 0;
   const tweetwithAddAvgViews = calculateAverageViewsPerTweet(tweetsWithAddressViews, tweetsWithAddressCount);
   const tweetwithAddAvgViewsS = calculateAverageViewsPerTweet(tweetsWithAddressViews.slice(-15), tweetsWithAddressCount.slice(-15));
-
+  //console.log("Engagemtnt",engagementData)
+  const tweetFomo = computeTimeBasedFOMO(engagementData,2,0.2)
+  
+  const getMetricGrid = computeMetricsBins(engagementData,5,5)
+  const compositFomo = computeCompositeFOMOIndex(getMetricGrid)
+  const macd = computeMACD(tweetFomo,)
+  const RSI = computeRSI(tweetFomo)
   const openPopup = (title: string, data: Impression[]) => {
     setSelectedMetric({ title, data });
   };
   const openPopupTime = (title: string, data: TimeSeries[]) => {
     setSelectedTimeMetric({ title, data });
+  };
+  const openPopupMacD = (title: string, data: MACDPoint[]) => {
+    setSelectedMacDMetric({ title, data });
+  };
+  const openPopupRSI = (title: string, data: Impression[]) => {
+    setSelectedRSIMetric({ title, data });
   };
   const openPopupBar = (title: string, data: Impression[]) => {
     setSelectedbarMetric({ title, data });
@@ -969,6 +1660,8 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
     setSelectedMetric(null);
     setSelectedTimeMetric(null);
     setSelectedbarMetric(null);
+    setSelectedMacDMetric(null)
+    setSelectedRSIMetric(null)
   };
 
   useEffect(() => {
@@ -1261,22 +1954,108 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
   };
   const renderEngagementCard = () => {
     if (activeEngagementMetric === 'growth') {
+      //const latestSEI = Array.isArray(SEI_value) && SEI_value.length > 0 ? SEI_value[SEI_value.length - 1] : null;
+      //  const latestValue = latestSEI && typeof latestSEI.value === 'number' ? latestSEI.value : null;
+      if (SEI_value.length > 0) {
+        const latestValue = SEI_value[SEI_value.length - 1].value;
       return (
         <MetricCard
-          title="Impression Growth"
-          value={impressionGrowth.toFixed(2) + "%"}
-          percentageChange={(impressionGrowth >= 0 ? "+" : "") + impressionGrowth.toFixed(2) + "%"}
+          title="Social Engagement Index"
+          value={latestValue !== null ? `${latestValue.toFixed(2)}%` : 'N/A'}
+          percentageChange={
+            latestValue !== null
+              ? `${latestValue >= 0 ? '+' : ''}${latestValue.toFixed(2)}%`
+              : 'N/A'
+          }
           subText={`Avg. impressions per ${dynamicInterval}-minute interval`}
-          isPositiveChange={impressionGrowthPercentage >= 0}
-          graph={<BarGraph_M data={impressionsGrouped} />}
-          onClick={() => openPopup("Impression Growth", impressionsGrouped)}
+          isPositiveChange={latestValue !== null ? latestValue >= 0 : false}
+          graph={<BarGraph_Main data={SEI_value || []}  />}
+          onClick={() => openPopupBar("Engagement Rate", SEI_value)}
           toggleControls={
             <div className="flex space-x-2 mb-2">
               <ToggleButton active={true} onClick={() => setActiveEngagementMetric('growth')}>
                 Growth
               </ToggleButton>
               <ToggleButton active={false} onClick={() => setActiveEngagementMetric('peaks')}>
-              Engagment
+                Velocity
+              </ToggleButton>
+            </div>
+          }
+        />
+
+      );}
+    } else {
+      return(
+        <MetricCard
+          title="Velocity Rate"
+          value={engagementGrowth.toFixed(2) + "%"}
+          percentageChange={(engagementGrowth >= 0 ? "+" : "") + engagementGrowth.toFixed(2) + "%"}
+          subText="Velocityy rate analysis"
+          isPositiveChange={engagementGrowth > 0}
+          graph={<LineGraph data={SEI_Velocity} color="#8B5CF6" />}
+          onClick={() => openPopup("Engagement Rate", SEI_Velocity)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={false} onClick={() => setActiveEngagementMetric('growth')}>
+                Growth
+              </ToggleButton>
+              <ToggleButton active={true} onClick={() => setActiveEngagementMetric('peaks')}>
+                Velocity
+              </ToggleButton>
+              
+            </div>
+          }
+        />
+      );
+    }
+  }
+  const renderFomoCard = () => {
+    if (activeFomoMetric === 'growth') {
+      return (
+        <MetricCard
+          title="Fomo Growth"
+          value={impressionGrowth.toFixed(2) + "%"}
+          percentageChange={(impressionGrowth >= 0 ? "+" : "") + impressionGrowth.toFixed(2) + "%"}
+          subText={`Avg. impressions per ${dynamicInterval}-minute interval`}
+          isPositiveChange={impressionGrowthPercentage >= 0}
+          graph={<LineGraph data={tweetFomo} color="#8B5CF6"/>}
+          onClick={() => openPopup("Fomo Growth", tweetFomo)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={true} onClick={() => setActiveFomoMetric('growth')}>
+                Growth
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveFomoMetric('macd')}>
+                MacD
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveFomoMetric('peaks')}>
+              Velocity
+              </ToggleButton>
+              
+            </div>
+          }
+        />
+      );
+    } else if (activeFomoMetric === 'macd') {
+      return (
+        <MetricCard
+          title="MACD Growth"
+          value={impressionGrowth.toFixed(2) + "%"}
+          percentageChange={(impressionGrowth >= 0 ? "+" : "") + impressionGrowth.toFixed(2) + "%"}
+          subText={`Avg. impressions per ${dynamicInterval}-minute interval`}
+          isPositiveChange={impressionGrowthPercentage >= 0}
+          graph={<MACDChart data={macd} />}
+          onClick={() => openPopupMacD("MACD Growth", macd)}
+          toggleControls={
+            <div className="flex space-x-2 mb-2">
+              <ToggleButton active={false} onClick={() => setActiveFomoMetric('growth')}>
+                Growth
+              </ToggleButton>
+              <ToggleButton active={true} onClick={() => setActiveFomoMetric('macd')}>
+                MacD
+              </ToggleButton>
+              <ToggleButton active={false} onClick={() => setActiveFomoMetric('peaks')}>
+              Velocity
               </ToggleButton>
               
             </div>
@@ -1286,20 +2065,23 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
     } else {
       return(
         <MetricCard
-          title="Engagement Rate"
-          value={engagementGrowth.toFixed(2) + "%"}
-          percentageChange={(engagementGrowth >= 0 ? "+" : "") + engagementGrowth.toFixed(2) + "%"}
-          subText="Engagement rate analysis"
-          isPositiveChange={engagementGrowth > 0}
-          graph={<LineGraph data={engagementSeries} color="#8B5CF6" />}
-          onClick={() => openPopup("Engagement Rate", engagementSeries)}
+          title="FOMO Index"
+          value={compositFomo?.[compositFomo.length-1].value.toFixed(2) + "%"}
+          percentageChange={(compositFomo?.[compositFomo.length-1].value >= 0 ? "+" : "") + compositFomo?.[compositFomo.length-1].value.toFixed(2) + "%"}
+          subText="Fomo analysis"
+          isPositiveChange={compositFomo?.[compositFomo.length-1].value > 0}
+          graph={<RSIChart rsiData={RSI} color="#8B5CF6" />}
+          onClick={() => openPopupRSI("Engagement Rate", RSI)}
           toggleControls={
             <div className="flex space-x-2 mb-2">
-              <ToggleButton active={false} onClick={() => setActiveEngagementMetric('growth')}>
+              <ToggleButton active={false} onClick={() => setActiveFomoMetric('growth')}>
                 Growth
               </ToggleButton>
-              <ToggleButton active={true} onClick={() => setActiveEngagementMetric('peaks')}>
-                Engagment
+              <ToggleButton active={false} onClick={() => setActiveFomoMetric('macd')}>
+                MacD
+              </ToggleButton>
+              <ToggleButton active={true} onClick={() => setActiveFomoMetric('peaks')}>
+                Velocity
               </ToggleButton>
               
             </div>
@@ -1368,12 +2150,12 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
       return (
         <MetricCard
           title="Peak Sentiments"
-          value={detectSentimentPeaks(cumuImpression).length.toString()}
+          value={detectSentimentPeaks(weighBasedImpression).length.toString()}
           percentageChange="Detected Peaks"
           subText="Number of sentiment peaks detected"
-          isPositiveChange={detectSentimentPeaks(cumuImpression).length > 0}
-          graph={<LineGraph data={detectSentimentPeaks(cumuImpression)} color="#EF4444" />}
-          onClick={() => openPopup("Peak Sentiments", detectSentimentPeaks(cumuImpression))}
+          isPositiveChange={detectSentimentPeaks(weighBasedImpression).length > 0}
+          graph={<LineGraph data={EWMA_Value} color="#EF4444" />}
+          onClick={() => openPopup("Peak Sentiments",EWMA_Value)}
           toggleControls={
             <div className="flex space-x-2 mb-2">
               <ToggleButton active={false} onClick={() => setActiveImpressionMetric('growth')}>
@@ -1528,6 +2310,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
         {renderImpressionCard()}
         {renderViewsCard()}
         {renderEngagementCard()}
+        {renderFomoCard()}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1597,7 +2380,7 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
         </div>
       </Modal>
       <Modal
-        isOpen={!!selectedMetric || !!selectedTimeMetric || !!selectedbarMetric}
+        isOpen={!!selectedMetric || !!selectedTimeMetric || !!selectedbarMetric || !!selectedMacDMetric || !!selectedRSIMetric}
         onRequestClose={closePopup}
         contentLabel="Metric Details"
         className="bg-gray-900 text-white w-[90vw] max-w-[1400px] h-[85vh] mx-auto rounded-lg p-6 shadow-lg"
@@ -1636,7 +2419,31 @@ const MetricsGrid: React.FC<MetricGridProps> = ({ address, name, twitter, tweetP
               Close
             </button>
           </>
-        )}
+        ) || selectedMacDMetric && (
+          <>
+            <h3 className="text-xl font-bold mb-4">{selectedMacDMetric.title}</h3>
+            <MACDMainChart data={selectedMacDMetric.data || []}/>
+            <button
+              className="mt-6 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded"
+              onClick={closePopup}
+            >
+              Close
+            </button>
+          </>
+        ) || selectedRSIMetric && (
+          <>
+            <h3 className="text-xl font-bold mb-4">{selectedRSIMetric.title}</h3>
+            <RSIChart rsiData={selectedRSIMetric.data || []}/>
+            <button
+              className="mt-6 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded"
+              onClick={closePopup}
+            >
+              Close
+            </button>
+          </>
+        )
+        
+        }
       </Modal>
      
     </div>

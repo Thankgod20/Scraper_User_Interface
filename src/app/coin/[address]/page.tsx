@@ -28,6 +28,7 @@ interface EngagementImpression {
   impression: number;
   views: number;
   volume: number;
+  followers: number;
 }
 interface CompImpression {
   name: string;
@@ -41,6 +42,7 @@ interface Engagement {
   retweets: number;
   comments: number;
   followers: number;
+  count: number;
 }
 const ALPHA = 0.01; // baseline pump magnitude (e.g., 1%)
 const BETA = 0.05;  // sensitivity coefficient
@@ -75,7 +77,7 @@ export default function Home() {
   const [predictedPump, setPredictedPump] = useState<number | null>(null);
   const [engagementData, setEngagementData] = useState<Engagement[]>([])
   
-  const engagementMap: Record<
+  /*const engagementMap: Record<
   string,
   { timestamp: string;
     impressions: number;
@@ -85,7 +87,9 @@ export default function Home() {
     followersSum: number;
     count: number;
   }
-> = {};
+> = {};*/
+
+
   const sentimentAnalyzer = new Sentiment();
   const options = {
     extras: {
@@ -196,7 +200,7 @@ export default function Home() {
       
       const processedText = preprocessText(text);
       const result = vader.SentimentIntensityAnalyzer.polarity_scores(processedText);
-      console.log("Sentiment Text",processedText,result)
+      //console.log("Sentiment Text",processedText,result)
       // Custom rule for "Rug probability:"
       const rugMatch = processedText.match(/Rug probability:\s*(\d+)%/i);
       if (rugMatch) {
@@ -658,7 +662,7 @@ export default function Home() {
   
       // Process data to calculate total views for each unique time
       const viewCounts: { [key: string]: number } = {};
-      const tweetEngagementCounts: { [key: string]: {impression: number; views: number; totalTweet: number; usernames: {[username: string]: {count: number; impression: number; views: number}}} } = {};
+      const tweetEngagementCounts: { [key: string]: {/*impression: number; views: number;*/ totalTweet: number; usernames: {[username: string]: {count: number; impression: number; views: number;followers:number}}} } = {};
       const engagementCounts: { [key: string]: number } = {};
       const tweetCounts: { [key: string]: number } = {};
       const tweetViews: { [key: string]: { last: number; prev: number } } = {};
@@ -669,7 +673,7 @@ export default function Home() {
       const extractedLikes: string[] = [];
       const extractedTimes: string[] = [];
       const extractedProfile: string[] = [];
-      
+      let engagementMap: Record<string, Record<string, Engagement>> = {};
       const filteredTweets = jsonData.filter((entry: any) => {
           return entry.tweet && entry.tweet.includes(address);
       });
@@ -692,6 +696,7 @@ export default function Home() {
       });
   
       validEntries.forEach((entry: any) => {
+        
           const times = entry.params.time;
           const views = entry.params.views;
           const likes = entry.params.likes;
@@ -703,7 +708,7 @@ export default function Home() {
           const profileImag = entry.profile_image;
           const followers = entry.followers;
           const username = statusUrl.split('https://x.com/')[1].split('/status/')[0];
-          
+          const lastSeen: Record<string, string> = {};
           if (profileImag != undefined) {
               extractedProfile.push(profileImag);
           }
@@ -731,9 +736,10 @@ export default function Home() {
           const emojiTimeStamp = new Date(timestamp).setSeconds(0, 0);
           
           times.forEach((time: number, index: number) => {
+              
               const view = isNaN(parseViewsCount(views[index])) ? 0 : parseViewsCount(views[index]);
               const date = new Date(eng_time[index]);
-  
+              
               const pad = (num:any) => num.toString().padStart(2, '0');
   
               const year = date.getFullYear();
@@ -746,6 +752,8 @@ export default function Home() {
               const like = isNaN(parseViewsCount(likes[index])) ? 0 : parseViewsCount(likes[index]);
               const comment = isNaN(parseViewsCount(comments[index])) ? 0 : parseViewsCount(comments[index]);
               const retweet = isNaN(parseViewsCount(retweets[index])) ? 0 : parseViewsCount(retweets[index]);
+              
+              const engagementMap_: Record<string, Record<string, Engagement>> = {};
               const timeKey = `${time} min`;
   
               if (viewCounts[plot_mint]) {
@@ -755,35 +763,45 @@ export default function Home() {
               }
               
               if (entry.tweet.includes(address)) {
-                  const impression = (like*0.2) + (comment*0.3) + (retweet*0.5);
+                  const impression = (like) + (comment) + (retweet*2);
                   
                   if (tweetEngagementCounts[plot_mint]) {
-                      tweetEngagementCounts[plot_mint].impression += impression;
-                      tweetEngagementCounts[plot_mint].views += view;
+                      //tweetEngagementCounts[plot_mint].impression += impression;
+                      //tweetEngagementCounts[plot_mint].views += view;
                       tweetEngagementCounts[plot_mint].totalTweet += 1;
-                      
+                      //tweetEngagementCounts[plot_mint].followers += followers;
                       // Track per username
+                      //(950 +350 +220)/ 3 = 
                       if (tweetEngagementCounts[plot_mint].usernames[username]) {
                           tweetEngagementCounts[plot_mint].usernames[username].count += 1;
-                          tweetEngagementCounts[plot_mint].usernames[username].impression += impression;
-                          tweetEngagementCounts[plot_mint].usernames[username].views += view;
+                          const prevAvgView = tweetEngagementCounts[plot_mint].usernames[username].views
+                          const vCount = tweetEngagementCounts[plot_mint].usernames[username].count;
+                          const prevImpression = tweetEngagementCounts[plot_mint].usernames[username].impression;
+                          const prevFollowers = tweetEngagementCounts[plot_mint].usernames[username].followers;
+                          tweetEngagementCounts[plot_mint].usernames[username].impression = ((prevImpression*(vCount-1))+impression)/vCount;
+                          
+                          tweetEngagementCounts[plot_mint].usernames[username].views = ((prevAvgView*(vCount-1))+view)/vCount;
+                          tweetEngagementCounts[plot_mint].usernames[username].followers = followers;
                       } else {
                           tweetEngagementCounts[plot_mint].usernames[username] = {
                               count: 1,
                               impression: impression,
-                              views: view
+                              views: view,
+                              followers: followers
                           };
                       }
                   } else {
                       tweetEngagementCounts[plot_mint] = {
-                          impression: impression,
-                          views: view,
+                          //impression: impression,
+                          //views: view,
                           totalTweet: 1,
+                          
                           usernames: {
                               [username]: {
                                   count: 1,
                                   impression: impression,
-                                  views: view
+                                  views: view,
+                                  followers: followers
                               }
                           }
                       };
@@ -791,29 +809,45 @@ export default function Home() {
               }
               
               if (engagementCounts[plot_mint]) {
-                  engagementCounts[plot_mint] += ((like*0.2) + (comment*0.3) + (retweet*0.5));
+                  engagementCounts[plot_mint] += ((like) + (comment) + (retweet*2));
               } else {
-                  engagementCounts[plot_mint] = ((like*0.2) + (comment*0.3) + (retweet*0.5));
+                  engagementCounts[plot_mint] = ((like) + (comment) + (retweet*2));
               }
-              
-              if (!engagementMap[plot_mint]) {
-                  engagementMap[plot_mint] = {
-                      timestamp: plot_mint,
-                      impressions: view,
-                      likes: like,
-                      retweets: retweet,
-                      comments: comment,
-                      followersSum: followers,
-                      count: 1
-                  };
-              } else {
-                  const bucket = engagementMap[plot_mint];
-                  bucket.impressions += view;
-                  bucket.likes += like;
-                  bucket.retweets += retweet;
-                  bucket.comments += comment;
-                  bucket.followersSum += followers;
-                  bucket.count += 1;
+
+              if (entry.tweet.includes(address)) {
+                
+                if (!engagementMap[plot_mint]) {
+                  engagementMap[plot_mint] = {};
+                }
+                const isNewEntry = !engagementMap[plot_mint][username];
+                if (isNewEntry) {
+                  engagementMap[plot_mint][username] = {
+                        timestamp: plot_mint,
+                        impressions: view,
+                        likes: like,
+                        retweets: retweet,
+                        comments: comment,
+                        followers: followers,
+                        count: 1
+                    };
+                } else {
+                    //console.log("Engagement Map Key",plot_mint +":"+username)
+                    const bucket = engagementMap[plot_mint][username];
+                    bucket.count += 1;
+                    const prevImpression = bucket.impressions
+                    const vCount = bucket.count;
+                    const prevLikes = bucket.likes;
+                    const prevRetweets = bucket.retweets;
+                    const prevComments = bucket.comments;
+                    const prevFollowers = bucket.followers;
+                    bucket.impressions = ((prevImpression*(vCount-1))+view)/vCount;
+                    bucket.likes = ((prevLikes*(vCount-1))+like)/vCount;
+                    bucket.retweets = ((prevRetweets*(vCount-1))+retweet)/vCount;;
+                    bucket.comments = ((prevComments*(vCount-1))+comment)/vCount;;
+                    bucket.followers = followers;
+                    
+                }
+                
               }
           });
           
@@ -851,18 +885,55 @@ export default function Home() {
               }
           }
       });
-      
-      const engagementArray: Engagement[] = Object.values(engagementMap)
-          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-          .map(bucket => ({
-              timestamp: bucket.timestamp,
-              impressions: bucket.impressions,
-              likes: bucket.likes,
-              retweets: bucket.retweets,
-              comments: bucket.comments,
-              followers: Math.round(bucket.followersSum / bucket.count)
-          }));
-          
+        
+        const engagementArray: Engagement[] = Object.values(engagementMap)
+            // 1) take each inner user-map and grab its values (the EngagementData objects)
+            .flatMap(userMap => Object.values(userMap))
+            // 2) sort by timestamp
+            .sort((a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+            )
+            // 3) map into the final shape (renaming followersSum → followers)
+            .map(data => ({
+              timestamp:   data.timestamp,
+              impressions: data.impressions,
+              likes:       data.likes,
+              retweets:    data.retweets,
+              comments:    data.comments,
+              followers:   data.followers,
+              count:       data.count
+            }));
+      /*
+        interface AggregatedData extends Engagement {}
+
+        // 1) Flatten all user-maps into one big array
+        const allData: Engagement[] = Object.values(engagementMap)
+          .flatMap(userMap => Object.values(userMap));
+
+        // 2) Reduce into a timestamp-keyed map, summing each metric
+        const aggrMap: Record<string, AggregatedData> = allData.reduce((acc, d) => {
+          const key = d.timestamp;
+          if (!acc[key]) {
+            // Initialize a fresh bucket
+            acc[key] = { ...d }; 
+          } else {
+            // Sum into existing bucket
+            acc[key].impressions += d.impressions;
+            acc[key].likes       += d.likes;
+            acc[key].retweets    += d.retweets;
+            acc[key].comments    += d.comments;
+            acc[key].followers   += d.followers;
+            acc[key].count       += d.count;
+          }
+          return acc;
+        }, {} as Record<string, AggregatedData>);
+
+        // 3) Convert back to array and sort by timestamp
+        const engagementArray: AggregatedData[] = Object.values(aggrMap)
+          .sort((a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+*/ 
       const impressionsArray = Object.entries(viewCounts).map(([name, value]) => ({
           name,
           value
@@ -896,6 +967,7 @@ export default function Home() {
           // Calculate averages per username
           let totalImpression = 0;
           let totalViews = 0;
+          let user_followers = 0;
           const uniqueUsernames = Object.keys(data.usernames);
           const uniqueUsernameCount = uniqueUsernames.length; // Count of unique usernames
           
@@ -903,15 +975,18 @@ export default function Home() {
           uniqueUsernames.forEach(username => {
               const userData = data.usernames[username];
               // Average the impressions and views for each username
-              totalImpression += userData.impression / userData.count;
-              totalViews += userData.views / userData.count;
+              totalImpression += userData.impression // userData.count;
+              totalViews += userData.views // userData.count;
+              user_followers += userData.followers;
+              //console.log("UserData",username,"Followers",userData.followers)
           });
-          
+          //console.log("Total Followers",user_followers,"Unique Usernames",uniqueUsernameCount,"Total Impression",totalImpression,"Total Views",totalViews)
           return {
               name,
               impression: totalImpression,
               views: totalViews,
-              volume: uniqueUsernameCount // Set volume to the count of unique usernames
+              volume: uniqueUsernameCount, // Set volume to the count of unique usernames
+              followers: user_followers,
           };
       }).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
       
