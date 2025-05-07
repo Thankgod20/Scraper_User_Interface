@@ -192,12 +192,12 @@ function computeMACD(
 }
 function computeImpressionsTimeSeries(
   tweets: Engagement[],
-  intervalMinutes: number = 15,
-  K: number = 10000,
-  N_baseline: number = 100
+  intervalMinutes: number = 5,
+  K: number = 5000,
+  N_baseline: number = 500
 ): Impression[] {
   if (tweets.length === 0) return [];
-
+  const totalvolume = tweets.length;  
   // Sort tweets by timestamp
   const sortedTweets = [...tweets].sort(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
@@ -222,6 +222,7 @@ function computeImpressionsTimeSeries(
 
     let totalQAI = 0;
     for (const tweet of bucketTweets) {
+      //console.log("tweet",tweet)
       const { likes, comments, retweets, impressions, followers } = tweet;
 
       const rawEngagement = likes + comments + 2*retweets + 0.5 * impressions;
@@ -233,7 +234,7 @@ function computeImpressionsTimeSeries(
     }
 
     const volumeScaling = Math.log(1 + (N / N_baseline));
-    const adjustedQAI = totalQAI * volumeScaling;
+    const adjustedQAI = totalQAI * volumeScaling; // Math.tanh(0.3*totalQAI)*(volumeScaling*Math.sqrt(totalvolume));
 
     intervals.push({
       name: new Date(intervalStart).toLocaleString(),

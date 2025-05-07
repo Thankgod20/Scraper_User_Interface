@@ -44,6 +44,10 @@ interface Engagement {
   followers: number;
   count: number;
 }
+type HistoryEntry = { 
+  amount: number;
+  time: string;
+};
 const ALPHA = 0.01; // baseline pump magnitude (e.g., 1%)
 const BETA = 0.05;  // sensitivity coefficient
 export default function Home() {
@@ -61,13 +65,16 @@ export default function Home() {
   const [emojiRawData, setEmojiRawData] = useState<{ em_time: number, emoji: string }[]>([]);
   const [holderRawData, setHoldersRawData] = useState<{ amount: number, price: number,time:string }[]>([]);
   const [holderData, setHoldersData] = useState<{ holders: number; time: string }[]>([]);
+  const [holderHistoryData, setHolderHistoryData] = useState<{ holders: number; time: string }[]>([]);
   const [usernames, setUsernames] = useState<string[]>([]);
   const [tweets, setTweets] = useState<string[]>([]);
   const [likes, setLikes] = useState<string[]>([]);
   const [viewscount, setViewCount] = useState<string[]>([]);
   const [time, setTime] = useState<string[]>([]);
   const [profile, setProfile] = useState<string[]>([]);
-
+  const [plotData, setPlotData] = useState<
+  { address: string; data: { time: string; amount: number }[] }[]
+>([]);
   const [chartData, setChartData] = useState<RawTradeData[]>([]);
   const [livePrice, setLivePrice] = useState<RawTradeData[]>([]);
   const [totalchartData, setTotalChartData] = useState<RawTradeData[]>([]);
@@ -1113,8 +1120,105 @@ export default function Home() {
       }
     };
     fetchHoldersPlot()
+    
+    const fetchHolderHistory = async () => {
+      try {
+        const hostname = await fetchHostnameFromConfig();
+    
+        const response = await fetch(`http://${hostname}:3300/api/holder-history?address=${address}`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+    
+        const jsonData = await response.json();
+    
+        if (!jsonData.holders || jsonData.holders.length === 0) return [];
+    
+        // Aggregate holder amounts across all holders, grouped by rounded timestamp
+        const holderData: { [time: string]: number } = {};
+        jsonData.holders.forEach((holder: any) => {
+          const { amount, time } = holder;
+    
+          if (!amount || !time || amount.length !== time.length) return;
+    
+          for (let i = 0; i < time.length; i++) {
+            const rawTime = new Date(time[i]).setSeconds(0, 0); // Round to nearest minute
+            const formattedTime = new Date(rawTime).toISOString();
+    
+            if (!holderData[formattedTime]) {
+              holderData[formattedTime] = 0;
+            }
+    
+            holderData[formattedTime] += amount[i];
+          }
+        });
+    
+        // Convert aggregated object to array
+        const holdersArray = Object.entries(holderData).map(([time, holders]) => ({
+          time,
+          holders,
+        }));
+        
+        // Sort by time
+        holdersArray.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+        console.log("Holder History",holdersArray)
+        // Only update state if different
+        setHolderHistoryData((prev) => {
+          if (JSON.stringify(prev) !== JSON.stringify(holdersArray)) {
+            return holdersArray;
+          }
+          return prev;
+        });
+    
+        return holdersArray;
+      } catch (error) {
+        console.error('Error fetching holder history data:', error);
+        return [];
+      }
+    };
+    
+    
+    fetchHolderHistory()
+    const fetchHolderTopData = async () => {
+      try {
+        const hostname = await fetchHostnameFromConfig();
+        const response = await fetch(
+          `http://${hostname}:3300/api/holder-history?address=${address}`
+        );
+
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+
+        const jsonData = await response.json();
+        const holders = jsonData.holders || [];
+
+        const top10 = holders
+          .filter((h: any) => h.amount?.length)
+          .map((h: any) => ({
+            address: h.address,
+            initial: h.amount[0],
+            amount: h.amount,
+            time: h.time,
+          }))
+          .sort((a: { initial: number }, b: { initial: number }) => b.initial - a.initial)
+  .slice(0, 10);
+
+        const formattedData = top10.map((holder:{ address: string; amount: number[]; time: string[] }) => ({
+          address: holder.address,
+          data: holder.time.map((t: string, i: number) => ({
+            time: new Date(t).toISOString(),
+            amount: holder.amount[i],
+          })),
+        }));
+
+        setPlotData(formattedData);
+      } catch (error) {
+        console.error('Error loading plot data:', error);
+      }
+    };
+    fetchHolderTopData()
     const interval = setInterval(() => {
-      fetchData();fetchHolersData();fetchHoldersPlot()
+      fetchData();fetchHolersData();fetchHoldersPlot();fetchHolderHistory();fetchHolderTopData()
     }, 60000); // Fetch every 60 seconds
 
     return () => clearInterval(interval);
@@ -1180,6 +1284,8 @@ export default function Home() {
               holders={holderRawData}
               live_prx={livePrice}
               holderplot={holderData}
+              holderhistroy={holderHistoryData}
+              plotdata={plotData}
             />
           </div>  
           {/* Right Section (Sidebar) */}

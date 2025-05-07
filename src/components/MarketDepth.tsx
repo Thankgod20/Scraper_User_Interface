@@ -676,7 +676,7 @@ const MarketDepthChart: React.FC<MarketDepthChartProps> = ({ orderBookData, live
 
   return (
     <div className="rounded-lg p-4 h-full flex flex-col w-full">
-      <div className="flex-grow relative">
+      <div className="flex-grow relative h-[30vh]">
         <svg
           ref={svgRef}
           width="100%"
