@@ -33,7 +33,7 @@ const BarGraph: React.FC<BarChartProps> = ({ data }) => {
   const prevDataRef = useRef<{[key: string]: number}>({});
   const increasesRef = useRef<{[key: string]: number}>({});
   const [chartData, setChartData] = useState<any[]>([]);
-  
+  data.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
   useEffect(() => {
     // Process the incoming data to track previous values
     const newChartData = data.map((item) => {

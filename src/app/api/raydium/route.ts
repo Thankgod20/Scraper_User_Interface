@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     const ohlcvResponse = await axios.get(ohlcvUrl);
 
     // Return the OHLCV data as JSON
-    return NextResponse.json(ohlcvResponse.data, { status: 200 });
+    return NextResponse.json({poolId,ohlcv:ohlcvResponse.data}, { status: 200 });
   } catch (error: any) {
     console.error("Error fetching data from GeckoTerminal:", error.message);
     return NextResponse.json(

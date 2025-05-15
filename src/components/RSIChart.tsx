@@ -46,11 +46,12 @@ const RSIChart: React.FC<RSIChartProps> = ({
   color = "#6366F1",
   buffer = 5,
 }) => {
+  rsiData.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
   // derive dynamic min/max
   const values = rsiData.map((d) => d.value);
   const minVal = Math.min(...values);
   const maxVal = Math.max(...values);
-
+  
   return (
     <ResponsiveContainer width="100%" height={200}>
       <LineChart data={rsiData} margin={{ top: 16, right: 24, bottom: 16, left: 0 }}>

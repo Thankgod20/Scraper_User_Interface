@@ -132,7 +132,7 @@ const TVChartContainer: React.FC<TVChartContainerProps> = ({
       close: entry.close,
       volume: entry.volume,
     }));
-    console.log("Load Data D",datass)
+    //console.log("Load Data D",datass)
     emojiData.forEach(({ em_time, emoji }) => {
       const emojiTime = typeof em_time === 'string' ? new Date(em_time).getTime() : em_time;
       const closestData = datass.find((dt) =>

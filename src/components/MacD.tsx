@@ -30,7 +30,7 @@ const CustomTooltip = ({ active, payload }: any) => {
     return (
       <div
         style={{
-          background: "#fff",
+          background: "",
           padding: "4px 8px",
           border: "1px solid #ccc",
           borderRadius: 4,
@@ -55,6 +55,7 @@ const MACDChart: React.FC<MACDChartProps> = ({
   signalColor = "#82ca9d",
   histColor = "#ffc658",
 }) => {
+  data.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
   return (
     <ResponsiveContainer width="100%" height={200}>
       <ComposedChart data={data}>

@@ -18,6 +18,8 @@ import Sentiment from 'sentiment';
 import OrderBookCard from '@/components/OrderBookCard';
 import OrderBookPanel from '@/components/OrderBookPanel';
 import vader from 'vader-sentiment';
+import { SellOffRisk,CategoryHoldings,MACDPoint,TimeSeriess } from '@/app/utils/app_types';
+//import { console } from 'inspector';
 //import AdvChart from '@/components/AdvChart';
 interface Impression {
   name: string;
@@ -48,33 +50,37 @@ type HistoryEntry = {
   amount: number;
   time: string;
 };
+type ZoomReport = {
+  totalpage: number;
+  currentpage: number;
+};
 const ALPHA = 0.01; // baseline pump magnitude (e.g., 1%)
 const BETA = 0.05;  // sensitivity coefficient
+
+export function loadMore(page:number,type:string):{data:{ amount: number, price: number,time:string }[],status:String} {
+   return {data:[],status:"End"}
+  
+  }
 export default function Home() {
   const { address }: { address: string } = useParams();
   const { metadata } = useMetadata();
   const [manualMetadata, setManualMetadata] = useState<{ name: string; symbol: string; uri: string }>();
   const [allMetadata, setAllMetadata] = useState<{ name: string; symbol: string; description: string; image: string; showName: boolean; createdOn: string; twitter: string; telegram: string; website: string }>();
   //console.log("metadata", metadata, metadata?.twitter)
-  const [tweetsWithAddress, setTweetsWithAddress] = useState<any[]>([]);
-  const [impressionsData, setImpressionsData] = useState<Impression[]>([]);
-  const [engaments, setEngamentData] = useState<Impression[]>([]);
-  const [tweetPerMinute, setTweetsPerMinuteData] = useState<Impression[]>([]);
-  const [tweetViewsPerMinute, setTweetsViewsPerMinuteData] = useState<CompImpression[]>([]);
-  const [tweetEngagment, setTweetEngagment] = useState<EngagementImpression[]>([]);
+
   const [emojiRawData, setEmojiRawData] = useState<{ em_time: number, emoji: string }[]>([]);
   const [holderRawData, setHoldersRawData] = useState<{ amount: number, price: number,time:string }[]>([]);
   const [holderData, setHoldersData] = useState<{ holders: number; time: string }[]>([]);
   const [holderHistoryData, setHolderHistoryData] = useState<{ holders: number; time: string }[]>([]);
   const [usernames, setUsernames] = useState<string[]>([]);
-  const [tweets, setTweets] = useState<string[]>([]);
+  const [utweets, setUTweets] = useState<string[]>([]);
   const [likes, setLikes] = useState<string[]>([]);
   const [viewscount, setViewCount] = useState<string[]>([]);
   const [time, setTime] = useState<string[]>([]);
   const [profile, setProfile] = useState<string[]>([]);
-  const [plotData, setPlotData] = useState<
-  { address: string; data: { time: string; amount: number }[] }[]
->([]);
+  const [plotData, setPlotData] = useState<SellOffRisk[]>([]);
+  const [plotDistribution, setPlotDistribution] = useState<CategoryHoldings>();
+  const [plotHoldigCount, setPlotHoldingCount] = useState<CategoryHoldings>();
   const [chartData, setChartData] = useState<RawTradeData[]>([]);
   const [livePrice, setLivePrice] = useState<RawTradeData[]>([]);
   const [totalchartData, setTotalChartData] = useState<RawTradeData[]>([]);
@@ -82,19 +88,90 @@ export default function Home() {
   // Overall aggregated sentiment and pump prediction across all tweets (optional)
   const [aggregatedSentiment, setAggregatedSentiment] = useState<number | null>(null);
   const [predictedPump, setPredictedPump] = useState<number | null>(null);
-  const [engagementData, setEngagementData] = useState<Engagement[]>([])
+  const [poolID, setPoolID] = useState<string>()
   
-  /*const engagementMap: Record<
-  string,
-  { timestamp: string;
-    impressions: number;
-    likes: number;
-    retweets: number;
-    comments: number;
-    followersSum: number;
-    count: number;
-  }
-> = {};*/
+  const [frequency, setFrequency] = useState<{
+    tweetFrequencyTrend: Impression[];
+    tweetsWithAddressFrequency: Impression[];
+  }>({
+    tweetFrequencyTrend: [],
+    tweetsWithAddressFrequency: [],
+  });
+
+  const [tweets, setTweets] = useState<{
+    tweetPerMinut: Impression[];
+    tweetPerFVmints: Impression[];
+    tweetsWithAddressCount: Impression[];
+  }>({
+    tweetPerMinut: [],
+    tweetPerFVmints: [],
+    tweetsWithAddressCount: [],
+  });
+
+  const [values, setValues] = useState<{
+    totalTweets: string;
+    averagePercentage: number;
+    averagePercentageFv: number;
+  }>({
+    totalTweets: '',
+    averagePercentage: 0,
+    averagePercentageFv: 0,
+  });
+
+  const [sei, setSEI] = useState<{
+    SEI_value: Impression[];
+    SEI_Velocity: Impression[];
+  }>({
+    SEI_value: [],
+    SEI_Velocity: [],
+  });
+
+  const [fomo, setFomo] = useState<{
+    tweetFomo: Impression[];
+    macd: MACDPoint[];
+    RSIx: Impression[];
+  }>({
+    tweetFomo: [],
+    macd: [],
+    RSIx: [],
+  });
+
+  const [tweetImpression, setTweetImpression] = useState<{
+    weighBasedImpression: Impression[];
+    sentimentTrend: TimeSeriess[];
+    EWMA_Value: Impression[];
+  }>({
+    weighBasedImpression: [],
+    sentimentTrend: [],
+    EWMA_Value: [],
+  });
+
+  const [views, setViews] = useState<{
+    tweetViewsPerFVmints: CompImpression[];
+    tweetsWithAddressViews: CompImpression[];
+    tweetViewsRatioPercentage: Impression[];
+  }>({
+    tweetViewsPerFVmints: [],
+    tweetsWithAddressViews: [],
+    tweetViewsRatioPercentage: [],
+  });
+
+  const [viewsAlt, setViewsAlt] = useState<{
+    avgViewsPerTweet: number;
+    tweetwithAddAvgViews: number;
+  }>({
+    avgViewsPerTweet: 0,
+    tweetwithAddAvgViews: 0,
+  });
+
+  const [hypeMeter, setHypeMeter] = useState<{
+    sentiMeter: number;
+    sentiMeterAddr: number;
+  }>({
+    sentiMeter: 0,
+    sentiMeterAddr: 0,
+  });
+
 
 
   const sentimentAnalyzer = new Sentiment();
@@ -239,7 +316,7 @@ export default function Home() {
     //console.log("timeSeries", timeSeries);
     setSentimentTimeSeries(timeSeries);
   };
-  
+
 
   useEffect(() => {
 
@@ -288,17 +365,7 @@ export default function Home() {
     fetchMetadata();
   }, [manualMetadata]);
   useEffect(() => {
-  /*  const fetchData = async () => {
-      const response = await fetch('/api/bitquery', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ address }),
-      });
-      const result = await response.json();
-      setChartData(result.data.Solana.DEXTradeByTokens);
-    };*/
+  
 
     const fetchRaydiumData = async () => {
       const response = await fetch('/api/raydium', {
@@ -308,9 +375,17 @@ export default function Home() {
         },
         body: JSON.stringify({ address }),
       });
+    
       const result = await response.json();
-      //console.log("Result chart",result.data.attributes.ohlcv_list)
-      const mappedData: RawTradeData[] = result.data.attributes.ohlcv_list.map((entry: number[]) => ({
+    
+      // Retrieve poolId
+      const poolId = result.poolId;
+      console.log("Pool ID:", poolId);
+      setPoolID(poolId)
+      // Retrieve and map OHLCV data
+      const ohlcvList = result.ohlcv?.data?.attributes?.ohlcv_list || [];
+    
+      const mappedData: RawTradeData[] = ohlcvList.map((entry: number[]) => ({
         time: entry[0],
         open: entry[1],
         high: entry[2],
@@ -318,16 +393,18 @@ export default function Home() {
         close: entry[4],
         volume: entry[5],
       }));
-      //console.log("Result chart",mappedData)
-      //setChartData(mappedData);
+    
       setChartData((prevData) => {
         if (JSON.stringify(prevData) !== JSON.stringify(mappedData)) {
           return mappedData;
         }
         return prevData;
       });
-      
+    
+      // You can store poolId in state or use it elsewhere as needed
+      // setPoolId(poolId); // if you have a state for poolId
     };
+    
    // fetchData();
     fetchRaydiumData();
     const fetchRaydiumLive = async () => {
@@ -340,7 +417,8 @@ export default function Home() {
       });
       const result = await response.json();
       //console.log("Result chart",result.data.attributes.ohlcv_list)
-      const mappedData: RawTradeData[] = result.data.attributes.ohlcv_list.map((entry: number[]) => ({
+      const ohlcvList = result.data?.attributes?.ohlcv_list || [];
+      const mappedData: RawTradeData[] = ohlcvList.map((entry: number[]) => ({
         time: entry[0],
         open: entry[1],
         high: entry[2],
@@ -407,713 +485,228 @@ export default function Home() {
     }
     return parseFloat(views); // For plain numbers
   };
-  useEffect(() => {/*
+  function appendUnique<T>(prev: T[], next: T[], uniqueKey: keyof T): T[] {
+    const existingKeys = new Set(prev.map(item => item[uniqueKey]));
+    const filtered = next.filter(item => !existingKeys.has(item[uniqueKey]));
+    return [...prev, ...filtered];
+  }
+  function appendUniqueByTime(
+    prev: { em_time: number; emoji: string }[],
+    next: { em_time: number; emoji: string }[]
+  ): { em_time: number; emoji: string }[] {
+    const existingTimes = new Set(prev.map(item => item.em_time));
+    const newItems = next.filter(item => !existingTimes.has(item.em_time));
+    return [...prev, ...newItems];
+  }
+  function appendUniqueAndSortByTime(
+    prev: { em_time: number; emoji: string }[],
+    next: { em_time: number; emoji: string }[]
+  ): { em_time: number; emoji: string }[] {
+    const combined = appendUniqueByTime(prev, next);
+    return combined.sort((a, b) => a.em_time - b.em_time);
+  }
+  useEffect(() => {
+    if (!address || !poolID) return;
     const fetchData = async () => {
-
-      const hostname = await fetchHostnameFromConfig();
-      const response = await fetch(`http://${hostname}:3300/fetch-data?search=${address}`)//fetch(`http://localhost:3300/spltoken/${address}.json`); 4x77NhFuVzWWDGEMUyB17e3nhvVdkV7HT2AZNmz6pump// Load the JSON data
-      const jsonData = await response.json();
-
-      // Process data to calculate total views for each unique time
-      const viewCounts: { [key: string]: number } = {};
-      const tweetEngagementCounts: { [key: string]: {impression:number;views:number,totalTweet:number} } = {};
-      const engagementCounts: { [key: string]: number } = {};
-      const tweetCounts: { [key: string]: number } = {};
-      const tweetViews: { [key: string]: { last: number; prev: number } } = {};//const tweetViews: { [key: string]: number } = {};
-      const emojiData: { [key: number]: string } = {};
-      const extractedUsernames: string[] = [];
-      const extractedTweets: string[] = [];
-      const extractedView: string[] = [];
-      const extractedLikes: string[] = [];
-      const extractedTimes: string[] = [];
-      const extractedProfile: string[] = [];
-      
-      const filteredTweets = jsonData.filter((entry: any) => {
-        return entry.tweet && entry.tweet.includes(address);
-      });
-      //console.log("Twittes with Address",filteredTweets)
-      // Map the filtered tweets to extract tweet, views, and likes
-      const filteredData = filteredTweets.map((entry: any) => {
-        // Assuming that views and likes are stored in entry.params.views and entry.params.likes respectively
-        // and that you want the last value from each array (as seen in your existing code)
-        const views = entry.params.views ? parseViewsCount(entry.params.views[entry.params.views.length - 1]) : 0;
-        const likes = entry.params.likes ? parseViewsCount(entry.params.likes[entry.params.likes.length - 1]) : 0;
-        const timestamp = entry.post_time ? entry.post_time : 0;
-        return {
-          tweet: entry.tweet,
-          views,
-          likes,
-          timestamp,
-          // You can include additional fields if needed
-        };
-      });
+      try {
+        const res = await fetch(`/api/sentiment?address=${address}&symbol=${allMetadata?.symbol}&page=1&limit=20`);
+        const data = await res.json();
     
-      // Update state with the new filtered data
-      setTweetsWithAddress(filteredData);
-      const validEntries = jsonData.filter((entry: any) => {
-        return entry.tweet && (entry.tweet.includes(address) || entry.tweet.includes(allMetadata?.symbol));
-      });
-      //console.log("Valid tweets", validEntries);
-      validEntries.forEach((entry: any) => {
-        const times = entry.params.time;
-        const views = entry.params.views;
-        const likes = entry.params.likes
-        const comments = entry.params.comment
-        const retweets = entry.params.retweet
-        const timestamp = entry.post_time
-        const eng_time = entry.params.plot_time
-        const statusUrl = entry.status;
-        const profileImag = entry.profile_image
-        const followers = entry.followers
-        const username = statusUrl.split('https://x.com/')[1].split('/status/')[0];
-        if (profileImag != undefined) {
-          extractedProfile.push(profileImag)
-        }
-        extractedUsernames.push("@" + username);
-        const tweets = entry.tweet;
-        extractedTweets.push(tweets)
-        extractedView.push(views)
-        extractedLikes.push(likes)
-        extractedTimes.push(timestamp)
-        
-        let minuteKey;
-        if (timestamp) {
-            try {
-                minuteKey = new Date(timestamp).toISOString().slice(0, 16);
-            } catch (error) {
-                console.warn("Invalid timestamp:", timestamp, error);
-                minuteKey = new Date().toISOString().slice(0, 16);
-            }
-        } else {
-            console.warn("Timestamp is empty or null, using current time.");
-            minuteKey = new Date().toISOString().slice(0, 16);
-        }
-        //console.log("Time Stamp minuteKey",minuteKey) // Format: "YYYY-MM-DDTHH:MM"
-        // console.log("TIme Stampe", timestamp, "Minutets", minuteKey)
-        const emojiTimeStamp = new Date(timestamp).setSeconds(0, 0);
-        let number_Tweet = 0
-        times.forEach((time: number, index: number) => {
-          const view = isNaN(parseViewsCount(views[index])) ? 0 : parseViewsCount(views[index]);
-          //const plot_mint = new Date(eng_time[index]).toISOString().slice(0, 16);
-          const date = new Date(eng_time[index]);
-
-          const pad = (num:any) => num.toString().padStart(2, '0');
-
-          const year = date.getFullYear();
-          const month = pad(date.getMonth() + 1); // Months are zero-based
-          const day = pad(date.getDate());
-          const hours = pad(date.getHours());
-          const minutes = pad(date.getMinutes());
-
-          const plot_mint = `${year}-${month}-${day}T${hours}:${minutes}`;
-          const like = isNaN(parseViewsCount(likes[index])) ? 0 : parseViewsCount(likes[index]);
-          const comment = isNaN(parseViewsCount(comments[index])) ? 0 : parseViewsCount(comments[index]);
-          const retweet = isNaN(parseViewsCount(retweets[index])) ? 0 : parseViewsCount(retweets[index]);
-          const timeKey = `${time} min`;
-
-          if (viewCounts[plot_mint]) {
-            viewCounts[plot_mint] += view;
-            
-          } else {
-            viewCounts[plot_mint] = view;
-            
-          }
-          if (entry.tweet.includes(address)) {
-            if (tweetEngagementCounts[plot_mint]) {
-              tweetEngagementCounts[plot_mint].impression+=(like*0.2) + (comment*0.3) + (retweet*0.5)
-              tweetEngagementCounts[plot_mint].views+=view
-              tweetEngagementCounts[plot_mint].totalTweet+=1
-            } else {
-              tweetEngagementCounts[plot_mint] = {impression:(like*0.2) + (comment*0.3) + (retweet*0.5),views:view,totalTweet:1}
-            }
-          }
-          if (engagementCounts[plot_mint]) {
-            engagementCounts[plot_mint] += ((like*0.2) + (comment*0.3) + (retweet*0.5));
-          } else {
-            engagementCounts[plot_mint] = ((like*0.2) + (comment*0.3) + (retweet*0.5));
-          }
-          if (!engagementMap[plot_mint]) {
-            engagementMap[plot_mint] = {
-              timestamp: plot_mint,
-              impressions:view,
-              likes:like,
-              retweets:retweet,
-              comments:comment,
-              followersSum: followers,
-              count: 1
-            };
-          } else {
-            const bucket = engagementMap[plot_mint];
-            bucket.impressions += view;
-            bucket.likes += like;
-            bucket.retweets += retweet;
-            bucket.comments += comment;
-            bucket.followersSum += followers;
-            bucket.count += 1;
-          }
-          //console.log("Engagement", like, comment, retweet, "Total", (like + comment + retweet))
+        if (!res.ok) throw new Error(data.error || 'Failed to fetch');
+        /*
+        setUTweets(data.tweetDetail.extractedTweets)
+        setLikes(data.tweetDetail.extractedLikes)
+        setUsernames(data.tweetDetail.extractedUsernames)
+        setViewCount(data.tweetDetail.extractedView)
+        setTime(data.tweetDetail.extractedTimes)
+        setProfile(data.tweetDetail.extractedProfile)*/
+        setUTweets(prevTweets => {
+          const existing = new Set(prevTweets);
+          const newUnique = data.tweetDetail.extractedTweets.filter((t:any) => !existing.has(t));
+          return [...prevTweets, ...newUnique];
         });
         
-        if (tweetCounts[minuteKey]) {
-          tweetCounts[minuteKey] += 1; // Increment the count for tweets in this minute
-        } else {
-          tweetCounts[minuteKey] = 1; // Initialize with 1 tweet for this minute
-        }
-        //console.log("views[time.length-1]",views[views.length-1])
-        const view = isNaN(parseViewsCount(views[views.length-1])) ? 0 : parseViewsCount(views[views.length-1]);
-        let viewPrev = 0//isNaN(parseViewsCount(views[views.length-2])) ? 0 : parseViewsCount(views[views.length-2]);
-        if (views.length>1) {
-          viewPrev = isNaN(parseViewsCount(views[views.length-2])) ? 0 : parseViewsCount(views[views.length-2]);
-        }
-        if (tweetViews[minuteKey]) {
-          tweetViews[minuteKey].last += view;
-          tweetViews[minuteKey].prev += viewPrev;
-        } else {
-          tweetViews[minuteKey] = { last: view, prev: viewPrev };
-        }
-        if (!emojiData[emojiTimeStamp]) {
-          const sentiment = parseViewsCount(views[views.length - 1])
-          if (sentiment > 10000) {
-            emojiData[emojiTimeStamp] = "💎"//profileImag ?? "https://via.placeholder.com/40"// Add emoji based on timestamp
-          } else if (sentiment > 5000) {
-            emojiData[emojiTimeStamp] = "♦️"
-          } else if (sentiment > 1000) {
-            emojiData[emojiTimeStamp] = "🥇"
-          } else if (sentiment > 500) {
-            emojiData[emojiTimeStamp] = "🥈"
-          } else {
-            emojiData[emojiTimeStamp] = "😎"
-          }
-        }
-      });
-      //console.log("Views tweetsPerViewsMinuteArray ",tweetViews)
-      // Convert the viewCounts object into an array
-      const engagementArray: Engagement[] = Object.values(engagementMap)
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-        .map(bucket => ({
-          timestamp: bucket.timestamp,
-          impressions: bucket.impressions,
-          likes: bucket.likes,
-          retweets: bucket.retweets,
-          comments: bucket.comments,
-          followers: Math.round(bucket.followersSum / bucket.count)
+        setLikes(prevLikes => {
+          const existing = new Set(prevLikes);
+          const newUnique = data.tweetDetail.extractedLikes.filter((l:any) => !existing.has(l));
+          return [...prevLikes, ...newUnique];
+        });
+        
+        setUsernames(prev => {
+          const existing = new Set(prev);
+          const newUnique = data.tweetDetail.extractedUsernames.filter((u:any) => !existing.has(u));
+          return [...prev, ...newUnique];
+        });
+        
+        setViewCount(prev => {
+          const existing = new Set(prev);
+          const newUnique = data.tweetDetail.extractedView.filter((v:any) => !existing.has(v));
+          return [...prev, ...newUnique];
+        });
+        
+        setTime(prev => {
+          const existing = new Set(prev);
+          const newUnique = data.tweetDetail.extractedTimes.filter((t:any) => !existing.has(t));
+          return [...prev, ...newUnique];
+        });
+        
+        setProfile(prev => {
+          const existing = new Set(prev);
+          const newUnique = data.tweetDetail.extractedProfile.filter((p:any) => !existing.has(p));
+          return [...prev, ...newUnique];
+        });
+        const { tweetFrequencyTrend, tweetsWithAddressFrequency } = data.frequency;
+
+        const {tweetsPerMinuteArray,tweetPerFVmints,tweetsWithAddressCount,totalTweets,averagePercentageFv,averagePercentage} = data.tweetperMinutes;
+       /*
+        setFrequency({
+          tweetFrequencyTrend: tweetFrequencyTrend.map((d: any) => ({
+            name: d.name,
+            value: d.value,
+          })),
+          tweetsWithAddressFrequency: tweetsWithAddressFrequency.map((d: any) => ({
+            name: d.name,
+            value: d.value,
+          })),
+        });
+
+        setTweets({
+          tweetPerMinut:tweetsPerMinuteArray,
+          tweetPerFVmints,
+          tweetsWithAddressCount
+        });
+         
+        setValues({
+          totalTweets,
+          averagePercentage,
+          averagePercentageFv,
+        });*/
+        setFrequency(prev => ({
+          tweetFrequencyTrend: appendUnique(prev.tweetFrequencyTrend, tweetFrequencyTrend, 'name'),
+          tweetsWithAddressFrequency: appendUnique(prev.tweetsWithAddressFrequency, tweetsWithAddressFrequency, 'name'),
         }));
-      const impressionsArray = Object.entries(viewCounts).map(([name, value]) => ({
-        name,
-        value
-      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-      const engamentArray = Object.entries(engagementCounts).map(([name, value]) => ({
-        name,
-        value
-      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-      // Convert the tweetCounts object into an array
-      const tweetsPerMinuteArray = Object.entries(tweetCounts).map(([name, value]) => ({
-        name,
-        value
-      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-      const emojiArray = Object.entries(emojiData).map(([time, emoji]) => ({
-        em_time: parseInt(time, 10),
-        emoji,
-      })).sort((a, b) => a.em_time - b.em_time);
-      /*
-      const tweetsPerViewsMinuteArray = Object.entries(tweetViews).map(([name, value]) => ({
-        name,
-        value
-      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());*//*
-      const tweetsPerViewsMinuteArray = Object.entries(tweetViews)
-      .map(([name, data]) => ({
-      name,
-      value: data.last,
-      preval: data.prev
-    }))
-    .sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-    const tweetsEngagementPlot = Object.entries(tweetEngagementCounts)
-      .map(([name, data]) => ({
-      name,
-      impression: data.impression,
-      views: data.views,
-      volume:data.totalTweet
-    }))
-    .sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-    setTweetsViewsPerMinuteData(tweetsPerViewsMinuteArray);
-    setTweetEngagment(tweetsEngagementPlot)
-      
-    setEmojiRawData(prevData => {
-      const newDataString = JSON.stringify(emojiArray);
-      const prevDataString = JSON.stringify(prevData);
-      
-      return newDataString !== prevDataString ? emojiArray : prevData;
-    });
-    //console.log("impressionsArray",impressionsArray)
-    setEngagementData(engagementArray);
-    setImpressionsData(impressionsArray);
-    setTweetsPerMinuteData(tweetsPerMinuteArray);
-    setTweetsViewsPerMinuteData(tweetsPerViewsMinuteArray);
-    setEngamentData(engamentArray)
-    setUsernames(extractedUsernames);
-    setTweets(extractedTweets)
-    setLikes(extractedLikes)
-    setViewCount(extractedView)
-    setTime(extractedTimes)
-    setProfile(extractedProfile)
+        setTweets(prev => ({
+          tweetPerMinut: appendUnique(prev.tweetPerMinut, tweetsPerMinuteArray, 'name'),
+          tweetPerFVmints: appendUnique(prev.tweetPerFVmints, tweetPerFVmints, 'name'),
+          tweetsWithAddressCount:appendUnique(prev.tweetsWithAddressCount, tweetsWithAddressCount, 'name'),
+        }));
+        setValues({
+          totalTweets,
+          averagePercentage,
+          averagePercentageFv,
+        });
+        
+       const {SEI_value,SEI_Velocity,SEI_EMA} = data.SEI;
+/*
+        setSEI({
+          SEI_value: SEI_value.map((d: any) => ({
+            name: d.name,
+            value: d.value,
+          })),
+          SEI_Velocity: SEI_Velocity.map((d: any) => ({
+            name: d.name,
+            value: d.value,
+          })),
+        });
+        //console.log("data.Fomo",data.SEI)
+        const {tweetFomo,compositFomo,macd,RSI} = data.Fomo;
+        
+        setFomo({
+          tweetFomo,
+          macd,
+          RSIx: RSI,
+        });
+        */
+        setSEI(prev => ({
+          SEI_value: appendUnique(prev.SEI_value, SEI_value, 'name'),
+          SEI_Velocity: appendUnique(prev.SEI_Velocity, SEI_Velocity, 'name'),
+        }));
+        const {tweetFomo,compositFomo,macd,RSI} = data.Fomo;
+        setFomo(prev => ({
+          tweetFomo: appendUnique(prev.tweetFomo, tweetFomo, 'name'),
+          macd: appendUnique(prev.macd, macd, 'name'),
+          RSIx: appendUnique(prev.RSIx, RSI, 'name'),
+        }));
+       const {weighBasedImpression,sentimentTrend,EWMA_Value} =data.impression
+        //setTweetImpression({weighBasedImpression,sentimentTrend,EWMA_Value})
+        setTweetImpression(prev=>({
+          weighBasedImpression: appendUnique(prev.weighBasedImpression, weighBasedImpression, 'name'),
+          sentimentTrend: appendUnique(prev.sentimentTrend, sentimentTrend, 'time'),
+          EWMA_Value: appendUnique(prev.EWMA_Value, EWMA_Value, 'name'),
+        }))
+       const {tweetViewsPerFVmints,tweetsWithAddressViews,tweetViewsRatioPercentage,avgViewsPerTweet,tweetwithAddAvgViews} =data.views
+        //console.log("data.impression",data.impression)
+        setViews(prev=>({
+          tweetViewsPerFVmints: appendUnique(prev.tweetViewsPerFVmints, tweetViewsPerFVmints, 'name'),
+          tweetsWithAddressViews: appendUnique(prev.tweetsWithAddressViews, tweetsWithAddressViews, 'name'),
+          tweetViewsRatioPercentage: appendUnique(prev.tweetViewsRatioPercentage, tweetViewsRatioPercentage, 'name'),
+        }))
 
-    computeOverallSentiment(jsonData);
-    // Compute sentiment time series (grouped by minute)
-    computeSentimentTimeSeries(jsonData);
+        setViewsAlt({
+          avgViewsPerTweet,
+          tweetwithAddAvgViews
+        })
+        const {sentiMeter,sentiMeterAddr}= data.hype
+        setHypeMeter({
+          sentiMeter,
+          sentiMeterAddr,
+        })
+        setEmojiRawData(prev => {
+          //const newDataString = JSON.stringify(data.emojiArray);
+          //const prevDataString = JSON.stringify(prevData);
+          
+          //return newDataString !== prevDataString ? data.emojiArray : prevData;
+          const uniqueData = appendUniqueAndSortByTime(prev, data.emojiArray); // or another unique field
+          return uniqueData//.length !== prev.length ? uniqueData : prev;
+      });
+      } catch (err) {
+        console.error('Error fetching aggregated holders:', err);
+      }
     };
-    fetchData();*/
-    const fetchData = async () => {
-      const hostname = await fetchHostnameFromConfig();
-      const response = await fetch(`http://${hostname}:3300/fetch-data?search=${address}`);
-      const jsonData = await response.json();
-  
-      // Process data to calculate total views for each unique time
-      const viewCounts: { [key: string]: number } = {};
-      const tweetEngagementCounts: { [key: string]: {/*impression: number; views: number;*/ totalTweet: number; usernames: {[username: string]: {count: number; impression: number; views: number;followers:number}}} } = {};
-      const engagementCounts: { [key: string]: number } = {};
-      const tweetCounts: { [key: string]: number } = {};
-      const tweetViews: { [key: string]: { last: number; prev: number } } = {};
-      const emojiData: { [key: number]: string } = {};
-      const extractedUsernames: string[] = [];
-      const extractedTweets: string[] = [];
-      const extractedView: string[] = [];
-      const extractedLikes: string[] = [];
-      const extractedTimes: string[] = [];
-      const extractedProfile: string[] = [];
-      let engagementMap: Record<string, Record<string, Engagement>> = {};
-      const filteredTweets = jsonData.filter((entry: any) => {
-          return entry.tweet && entry.tweet.includes(address);
-      });
-      
-      const filteredData = filteredTweets.map((entry: any) => {
-          const views = entry.params.views ? parseViewsCount(entry.params.views[entry.params.views.length - 1]) : 0;
-          const likes = entry.params.likes ? parseViewsCount(entry.params.likes[entry.params.likes.length - 1]) : 0;
-          const timestamp = entry.post_time ? entry.post_time : 0;
-          return {
-              tweet: entry.tweet,
-              views,
-              likes,
-              timestamp,
-          };
-      });
-  
-      setTweetsWithAddress(filteredData);
-      const validEntries = jsonData.filter((entry: any) => {
-          return entry.tweet && (entry.tweet.includes(address) || entry.tweet.includes(allMetadata?.symbol));
-      });
-  
-      validEntries.forEach((entry: any) => {
-        
-          const times = entry.params.time;
-          const views = entry.params.views;
-          const likes = entry.params.likes;
-          const comments = entry.params.comment;
-          const retweets = entry.params.retweet;
-          const timestamp = entry.post_time;
-          const eng_time = entry.params.plot_time;
-          const statusUrl = entry.status;
-          const profileImag = entry.profile_image;
-          const followers = entry.followers;
-          const username = statusUrl.split('https://x.com/')[1].split('/status/')[0];
-          const lastSeen: Record<string, string> = {};
-          if (profileImag != undefined) {
-              extractedProfile.push(profileImag);
-          }
-          
-          extractedUsernames.push("@" + username);
-          const tweets = entry.tweet;
-          extractedTweets.push(tweets);
-          extractedView.push(views);
-          extractedLikes.push(likes);
-          extractedTimes.push(timestamp);
-          
-          let minuteKey;
-          if (timestamp) {
-              try {
-                  minuteKey = new Date(timestamp).toISOString().slice(0, 16);
-              } catch (error) {
-                  console.warn("Invalid timestamp:", timestamp, error);
-                  minuteKey = new Date().toISOString().slice(0, 16);
-              }
-          } else {
-              console.warn("Timestamp is empty or null, using current time.");
-              minuteKey = new Date().toISOString().slice(0, 16);
-          }
-          
-          const emojiTimeStamp = new Date(timestamp).setSeconds(0, 0);
-          
-          times.forEach((time: number, index: number) => {
-              
-              const view = isNaN(parseViewsCount(views[index])) ? 0 : parseViewsCount(views[index]);
-              const date = new Date(eng_time[index]);
-              
-              const pad = (num:any) => num.toString().padStart(2, '0');
-  
-              const year = date.getFullYear();
-              const month = pad(date.getMonth() + 1);
-              const day = pad(date.getDate());
-              const hours = pad(date.getHours());
-              const minutes = pad(date.getMinutes());
-  
-              const plot_mint = `${year}-${month}-${day}T${hours}:${minutes}`;
-              const like = isNaN(parseViewsCount(likes[index])) ? 0 : parseViewsCount(likes[index]);
-              const comment = isNaN(parseViewsCount(comments[index])) ? 0 : parseViewsCount(comments[index]);
-              const retweet = isNaN(parseViewsCount(retweets[index])) ? 0 : parseViewsCount(retweets[index]);
-              
-              const engagementMap_: Record<string, Record<string, Engagement>> = {};
-              const timeKey = `${time} min`;
-  
-              if (viewCounts[plot_mint]) {
-                  viewCounts[plot_mint] += view;
-              } else {
-                  viewCounts[plot_mint] = view;
-              }
-              
-              if (entry.tweet.includes(address)) {
-                  const impression = (like) + (comment) + (retweet*2);
-                  
-                  if (tweetEngagementCounts[plot_mint]) {
-                      //tweetEngagementCounts[plot_mint].impression += impression;
-                      //tweetEngagementCounts[plot_mint].views += view;
-                      tweetEngagementCounts[plot_mint].totalTweet += 1;
-                      //tweetEngagementCounts[plot_mint].followers += followers;
-                      // Track per username
-                      //(950 +350 +220)/ 3 = 
-                      if (tweetEngagementCounts[plot_mint].usernames[username]) {
-                          tweetEngagementCounts[plot_mint].usernames[username].count += 1;
-                          const prevAvgView = tweetEngagementCounts[plot_mint].usernames[username].views
-                          const vCount = tweetEngagementCounts[plot_mint].usernames[username].count;
-                          const prevImpression = tweetEngagementCounts[plot_mint].usernames[username].impression;
-                          const prevFollowers = tweetEngagementCounts[plot_mint].usernames[username].followers;
-                          tweetEngagementCounts[plot_mint].usernames[username].impression = ((prevImpression*(vCount-1))+impression)/vCount;
-                          
-                          tweetEngagementCounts[plot_mint].usernames[username].views = ((prevAvgView*(vCount-1))+view)/vCount;
-                          tweetEngagementCounts[plot_mint].usernames[username].followers = followers;
-                      } else {
-                          tweetEngagementCounts[plot_mint].usernames[username] = {
-                              count: 1,
-                              impression: impression,
-                              views: view,
-                              followers: followers
-                          };
-                      }
-                  } else {
-                      tweetEngagementCounts[plot_mint] = {
-                          //impression: impression,
-                          //views: view,
-                          totalTweet: 1,
-                          
-                          usernames: {
-                              [username]: {
-                                  count: 1,
-                                  impression: impression,
-                                  views: view,
-                                  followers: followers
-                              }
-                          }
-                      };
-                  }
-              }
-              
-              if (engagementCounts[plot_mint]) {
-                  engagementCounts[plot_mint] += ((like) + (comment) + (retweet*2));
-              } else {
-                  engagementCounts[plot_mint] = ((like) + (comment) + (retweet*2));
-              }
-
-              if (entry.tweet.includes(address)) {
-                
-                if (!engagementMap[plot_mint]) {
-                  engagementMap[plot_mint] = {};
-                }
-                const isNewEntry = !engagementMap[plot_mint][username];
-                if (isNewEntry) {
-                  engagementMap[plot_mint][username] = {
-                        timestamp: plot_mint,
-                        impressions: view,
-                        likes: like,
-                        retweets: retweet,
-                        comments: comment,
-                        followers: followers,
-                        count: 1
-                    };
-                } else {
-                    //console.log("Engagement Map Key",plot_mint +":"+username)
-                    const bucket = engagementMap[plot_mint][username];
-                    bucket.count += 1;
-                    const prevImpression = bucket.impressions
-                    const vCount = bucket.count;
-                    const prevLikes = bucket.likes;
-                    const prevRetweets = bucket.retweets;
-                    const prevComments = bucket.comments;
-                    const prevFollowers = bucket.followers;
-                    bucket.impressions = ((prevImpression*(vCount-1))+view)/vCount;
-                    bucket.likes = ((prevLikes*(vCount-1))+like)/vCount;
-                    bucket.retweets = ((prevRetweets*(vCount-1))+retweet)/vCount;;
-                    bucket.comments = ((prevComments*(vCount-1))+comment)/vCount;;
-                    bucket.followers = followers;
-                    
-                }
-                
-              }
-          });
-          
-          if (tweetCounts[minuteKey]) {
-              tweetCounts[minuteKey] += 1;
-          } else {
-              tweetCounts[minuteKey] = 1;
-          }
-          
-          const view = isNaN(parseViewsCount(views[views.length-1])) ? 0 : parseViewsCount(views[views.length-1]);
-          let viewPrev = 0;
-          if (views.length > 1) {
-              viewPrev = isNaN(parseViewsCount(views[views.length-2])) ? 0 : parseViewsCount(views[views.length-2]);
-          }
-          
-          if (tweetViews[minuteKey]) {
-              tweetViews[minuteKey].last += view;
-              tweetViews[minuteKey].prev += viewPrev;
-          } else {
-              tweetViews[minuteKey] = { last: view, prev: viewPrev };
-          }
-          
-          if (!emojiData[emojiTimeStamp]) {
-              const sentiment = parseViewsCount(views[views.length - 1]);
-              if (sentiment > 10000) {
-                  emojiData[emojiTimeStamp] = "💎";
-              } else if (sentiment > 5000) {
-                  emojiData[emojiTimeStamp] = "♦️";
-              } else if (sentiment > 1000) {
-                  emojiData[emojiTimeStamp] = "🥇";
-              } else if (sentiment > 500) {
-                  emojiData[emojiTimeStamp] = "🥈";
-              } else {
-                  emojiData[emojiTimeStamp] = "😎";
-              }
-          }
-      });
-        
-        const engagementArray: Engagement[] = Object.values(engagementMap)
-            // 1) take each inner user-map and grab its values (the EngagementData objects)
-            .flatMap(userMap => Object.values(userMap))
-            // 2) sort by timestamp
-            .sort((a, b) =>
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-            )
-            // 3) map into the final shape (renaming followersSum → followers)
-            .map(data => ({
-              timestamp:   data.timestamp,
-              impressions: data.impressions,
-              likes:       data.likes,
-              retweets:    data.retweets,
-              comments:    data.comments,
-              followers:   data.followers,
-              count:       data.count
-            }));
-      /*
-        interface AggregatedData extends Engagement {}
-
-        // 1) Flatten all user-maps into one big array
-        const allData: Engagement[] = Object.values(engagementMap)
-          .flatMap(userMap => Object.values(userMap));
-
-        // 2) Reduce into a timestamp-keyed map, summing each metric
-        const aggrMap: Record<string, AggregatedData> = allData.reduce((acc, d) => {
-          const key = d.timestamp;
-          if (!acc[key]) {
-            // Initialize a fresh bucket
-            acc[key] = { ...d }; 
-          } else {
-            // Sum into existing bucket
-            acc[key].impressions += d.impressions;
-            acc[key].likes       += d.likes;
-            acc[key].retweets    += d.retweets;
-            acc[key].comments    += d.comments;
-            acc[key].followers   += d.followers;
-            acc[key].count       += d.count;
-          }
-          return acc;
-        }, {} as Record<string, AggregatedData>);
-
-        // 3) Convert back to array and sort by timestamp
-        const engagementArray: AggregatedData[] = Object.values(aggrMap)
-          .sort((a, b) =>
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-          );
-*/ 
-      const impressionsArray = Object.entries(viewCounts).map(([name, value]) => ({
-          name,
-          value
-      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-      
-      const engamentArray = Object.entries(engagementCounts).map(([name, value]) => ({
-          name,
-          value
-      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-      
-      const tweetsPerMinuteArray = Object.entries(tweetCounts).map(([name, value]) => ({
-          name,
-          value
-      })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-      
-      const emojiArray = Object.entries(emojiData).map(([time, emoji]) => ({
-          em_time: parseInt(time, 10),
-          emoji,
-      })).sort((a, b) => a.em_time - b.em_time);
-      
-      const tweetsPerViewsMinuteArray = Object.entries(tweetViews)
-          .map(([name, data]) => ({
-              name,
-              value: data.last,
-              preval: data.prev
-          }))
-          .sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-      
-      // Modified: Process tweetEngagementCounts to average by username but count unique usernames for volume
-      const tweetsEngagementPlot = Object.entries(tweetEngagementCounts).map(([name, data]) => {
-          // Calculate averages per username
-          let totalImpression = 0;
-          let totalViews = 0;
-          let user_followers = 0;
-          const uniqueUsernames = Object.keys(data.usernames);
-          const uniqueUsernameCount = uniqueUsernames.length; // Count of unique usernames
-          
-          // Process each username's data
-          uniqueUsernames.forEach(username => {
-              const userData = data.usernames[username];
-              // Average the impressions and views for each username
-              totalImpression += userData.impression // userData.count;
-              totalViews += userData.views // userData.count;
-              user_followers += userData.followers;
-              //console.log("UserData",username,"Followers",userData.followers)
-          });
-          //console.log("Total Followers",user_followers,"Unique Usernames",uniqueUsernameCount,"Total Impression",totalImpression,"Total Views",totalViews)
-          return {
-              name,
-              impression: totalImpression,
-              views: totalViews,
-              volume: uniqueUsernameCount, // Set volume to the count of unique usernames
-              followers: user_followers,
-          };
-      }).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-      
-      setTweetsViewsPerMinuteData(tweetsPerViewsMinuteArray);
-      setTweetEngagment(tweetsEngagementPlot);
-      
-      setEmojiRawData(prevData => {
-          const newDataString = JSON.stringify(emojiArray);
-          const prevDataString = JSON.stringify(prevData);
-          
-          return newDataString !== prevDataString ? emojiArray : prevData;
-      });
-      
-      setEngagementData(engagementArray);
-      setImpressionsData(impressionsArray);
-      setTweetsPerMinuteData(tweetsPerMinuteArray);
-      setTweetsViewsPerMinuteData(tweetsPerViewsMinuteArray);
-      setEngamentData(engamentArray);
-      setUsernames(extractedUsernames);
-      setTweets(extractedTweets);
-      setLikes(extractedLikes);
-      setViewCount(extractedView);
-      setTime(extractedTimes);
-      setProfile(extractedProfile);
-  
-      computeOverallSentiment(jsonData);
-      computeSentimentTimeSeries(jsonData);
-  };
   
   fetchData();
     const fetchHolersData = async () => {
       try {
-        const hostname = await fetchHostnameFromConfig();
-        const response = await fetch(`http://${hostname}:3300/fetch-holders?search=${address}`);
-        const jsonData = await response.json();
+        const res = await fetch(`/api/holders-aggregated?address=${address}&page=1&limit=50`);
+        const data = await res.json();
     
-        // Aggregate data by price and time (converted to an ISO string with seconds and milliseconds reset)
-        const holderData: { [key: string]: { price: number; amount: number; time: string } } = {};
-        jsonData.forEach((entry: any) => {
-          const price = parseFloat(entry.price);
-          const amount = parseFloat(entry.amount);
-          // Round the time to the nearest minute (seconds & milliseconds zeroed)
-          const timeNumber = new Date(entry.time).setSeconds(0, 0);
-          // Convert the time back to a string (ISO format)
-          const formattedTime = new Date(timeNumber).toISOString();
-          // Create a composite key using price and the formatted time
-          const key = `${price}_${formattedTime}`;
+        if (!res.ok) throw new Error(data.error || 'Failed to fetch');
     
-          if (holderData[key] !== undefined) {
-            holderData[key].amount += amount;
-          } else {
-            holderData[key] = { price, amount, time: formattedTime };
-          }
-        });
-    
-        // Convert aggregated object to an array of objects with numerical price, amount, and time string.
-        const holdersArray = Object.values(holderData);
-    
-        // Only update state if the new data differs from the current state.
         setHoldersRawData((prev) => {
-          if (JSON.stringify(prev) !== JSON.stringify(holdersArray)) {
-            return holdersArray;
+          if (JSON.stringify(prev) !== JSON.stringify(data.holders)) {
+            return data.holders;
           }
           return prev;
         });
-      } catch (error) {
-        console.error('Error fetching holders data:', error);
+      } catch (err) {
+        console.error('Error fetching aggregated holders:', err);
       }
     };
     
      fetchHolersData()
      const fetchHoldersPlot = async () => {
       try {
-        const hostname = await fetchHostnameFromConfig();
+        const res = await fetch(`/api/holder-snapshots?address=${address}&page=1&limit=50`);
+        const data = await res.json();
         
-        // Use the provided URL pattern but with the correct path
-        const response = await fetch(`http://${hostname}:3300/api/holder-snapshots?address=${address}`);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`);
-        }
-        
-        const jsonData = await response.json();
-        
-        // Aggregate data by price and time (converted to an ISO string with seconds and milliseconds reset)
-        const holderData: { [key: string]: { holders: number; time: string } } = {};
-        
-        jsonData.forEach((entry: any) => {
-          // Extract the holders count
-          const holders = parseInt(entry.holders);
-          
-          // Round the time to the nearest minute (seconds & milliseconds zeroed)
-          const timeNumber = new Date(entry.time).setSeconds(0, 0);
-          
-          // Convert the time back to a string (ISO format)
-          const formattedTime = new Date(timeNumber).toISOString();
-          
-          // Use the formatted time as the key since we're tracking holders over time
-          const key = formattedTime;
-          
-          // For holder snapshots, we're likely interested in the latest count for each minute
-          // We could also sum or average if there are multiple entries per minute
-          holderData[key] = { holders, time: formattedTime };
-        });
-        
-        // Convert aggregated object to an array of objects with holders count and time
-        const holdersArray = Object.values(holderData);
-        
-        // Sort by time to ensure chronological order
-        holdersArray.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+        if (!res.ok) throw new Error(data.error || 'Failed to fetch');
         
         // Only update state if the new data differs from the current state
         setHoldersData((prev) => {
-          if (JSON.stringify(prev) !== JSON.stringify(holdersArray)) {
-            return holdersArray;
-          }
-          return prev;
+          //if (JSON.stringify(prev) !== JSON.stringify(data.snapshot)) {
+           // return data.snapshot;
+          //}
+          //return prev;
+          const existingTimes = new Set(prev.map((d) => d.time));
+    
+          // Filter out duplicates based on time
+          const newUniqueData = data.snapshot.filter((d:any) => !existingTimes.has(d.time));
+    
+          // Append new unique data to the end
+          return [...prev, ...newUniqueData];
         });
         
-        return holdersArray;
+        return data.snapshot;
       } catch (error) {
         console.error('Error fetching holders data:', error);
         return [];
@@ -1123,55 +716,22 @@ export default function Home() {
     
     const fetchHolderHistory = async () => {
       try {
-        const hostname = await fetchHostnameFromConfig();
+        const res = await fetch(`/api/holders-history?address=${address}&page=1&limit=50`);
+        const data = await res.json();
     
-        const response = await fetch(`http://${hostname}:3300/api/holder-history?address=${address}`);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! Status: ${response.status}`);
-        }
+        if (!res.ok) throw new Error(data.error || 'Failed to fetch');
     
-        const jsonData = await response.json();
-    
-        if (!jsonData.holders || jsonData.holders.length === 0) return [];
-    
-        // Aggregate holder amounts across all holders, grouped by rounded timestamp
-        const holderData: { [time: string]: number } = {};
-        jsonData.holders.forEach((holder: any) => {
-          const { amount, time } = holder;
-    
-          if (!amount || !time || amount.length !== time.length) return;
-    
-          for (let i = 0; i < time.length; i++) {
-            const rawTime = new Date(time[i]).setSeconds(0, 0); // Round to nearest minute
-            const formattedTime = new Date(rawTime).toISOString();
-    
-            if (!holderData[formattedTime]) {
-              holderData[formattedTime] = 0;
-            }
-    
-            holderData[formattedTime] += amount[i];
-          }
-        });
-    
-        // Convert aggregated object to array
-        const holdersArray = Object.entries(holderData).map(([time, holders]) => ({
-          time,
-          holders,
-        }));
-        
-        // Sort by time
-        holdersArray.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-        console.log("Holder History",holdersArray)
-        // Only update state if different
         setHolderHistoryData((prev) => {
-          if (JSON.stringify(prev) !== JSON.stringify(holdersArray)) {
-            return holdersArray;
-          }
-          return prev;
+          const existingTimes = new Set(prev.map((d) => d.time));
+    
+          // Filter out duplicates based on time
+          const newUniqueData = data.history.filter((d:any) => !existingTimes.has(d.time));
+    
+          // Append new unique data to the end
+          return [...prev, ...newUniqueData];
         });
     
-        return holdersArray;
+        return data.history;
       } catch (error) {
         console.error('Error fetching holder history data:', error);
         return [];
@@ -1179,50 +739,339 @@ export default function Home() {
     };
     
     
+    
     fetchHolderHistory()
-    const fetchHolderTopData = async () => {
+    const fetchSRS = async () => {
       try {
-        const hostname = await fetchHostnameFromConfig();
-        const response = await fetch(
-          `http://${hostname}:3300/api/holder-history?address=${address}`
-        );
-
-        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-
-        const jsonData = await response.json();
-        const holders = jsonData.holders || [];
-
-        const top10 = holders
-          .filter((h: any) => h.amount?.length)
-          .map((h: any) => ({
-            address: h.address,
-            initial: h.amount[0],
-            amount: h.amount,
-            time: h.time,
-          }))
-          .sort((a: { initial: number }, b: { initial: number }) => b.initial - a.initial)
-  .slice(0, 10);
-
-        const formattedData = top10.map((holder:{ address: string; amount: number[]; time: string[] }) => ({
-          address: holder.address,
-          data: holder.time.map((t: string, i: number) => ({
-            time: new Date(t).toISOString(),
-            amount: holder.amount[i],
-          })),
+        const res = await fetch(`/api/holder-srs?address=${address}&lps=${poolID}&page=1&limit=50`);
+        const data = await res.json();
+    
+        if (!res.ok) throw new Error(data.error || 'Unknown error');
+        //console.log('SRS:', data);
+    
+        // Replace full distribution and SRS plot data
+        setPlotDistribution((prev) => ({
+          whales: { ...prev?.whales, ...data.procssholding.whales },
+          retail: { ...prev?.retail, ...data.procssholding.retail },
+          lps: { ...prev?.lps, ...data.procssholding.lps },
         }));
-
-        setPlotData(formattedData);
-      } catch (error) {
-        console.error('Error loading plot data:', error);
+    
+        setPlotData((prev) => {
+          const existingTimestamps = new Set(prev.map(p => p.time));
+          const newPoints = data.srs.filter((point: any) => !existingTimestamps.has(point.timestamp));
+          return [...prev, ...newPoints];
+        });
+    
+        // Append and override entries in each category
+        setPlotHoldingCount((prev) => {
+          const safePrev: CategoryHoldings = {
+            whales: prev?.whales || {},
+            retail: prev?.retail || {},
+            lps: prev?.lps || {},
+          };
+    
+          return {
+            whales: { ...safePrev.whales, ...data.procssholdingcount.whales },
+            retail: { ...safePrev.retail, ...data.procssholdingcount.retail },
+            lps: { ...safePrev.lps, ...data.procssholdingcount.lps },
+          };
+        });
+      } catch (err) {
+        console.error('Error fetching SRS:', err);
       }
     };
-    fetchHolderTopData()
+    
+    fetchSRS();
+    
+    
     const interval = setInterval(() => {
-      fetchData();fetchHolersData();fetchHoldersPlot();fetchHolderHistory();fetchHolderTopData()
+      fetchData();fetchHolersData();fetchHoldersPlot();fetchHolderHistory();fetchSRS()
     }, 60000); // Fetch every 60 seconds
 
     return () => clearInterval(interval);
-  }, [address,allMetadata]);
+  }, [address,allMetadata,poolID]);
+
+const fetchHolderMain = async (page:number,funtype:string) : Promise<ZoomReport> => {
+  console.log("fetchHolderMain",page,funtype)
+  switch (funtype) {
+    case "hldnum":
+      return await fetchHolderPlot_(page) 
+    case "hldds":
+      return await fetchHolderHistory_(page)
+    case "ct":
+      return await fetchOlderHoldingCount(page)
+    case "ds":
+      return await fetchOlderPlotDS(page)
+    case "srs":
+      console.log('srs')
+      return await fetchOlderPlotData(page)
+    default:
+      return { totalpage: 0, currentpage: 0 };
+      
+  }
+}
+const fetchHolderPlot_ = async (page:number) => {
+  try {
+    const res = await fetch(`/api/holder-snapshots?address=${address}&page=${page}&limit=50`);
+    const data = await res.json();
+    
+    if (!res.ok) throw new Error(data.error || 'Failed to fetch');
+    
+    // Only update state if the new data differs from the current state
+    setHoldersData((prev) => {
+      //if (JSON.stringify(prev) !== JSON.stringify(data.snapshot)) {
+        // return data.snapshot;
+      //}
+      //return prev;
+      const existingTimes = new Set(prev.map((d) => d.time));
+
+      // Filter out duplicates based on time
+      const newUniqueData = data.snapshot.filter((d:any) => !existingTimes.has(d.time));
+
+      // Append new unique data to the end
+      return [...prev, ...newUniqueData];
+    });
+
+    return {
+      totalpage: data.totalPages,
+      currentpage: data.page,
+    };
+  } catch (error) {
+    console.error('Error fetching holder history data:', error);
+    return { totalpage: 0, currentpage: 0 };
+  }
+};
+const fetchHolderHistory_ = async (page:number) => {
+  try {
+    const res = await fetch(`/api/holders-history?address=${address}&page=${page}&limit=50`);
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || 'Failed to fetch');
+
+    setHolderHistoryData((prev) => {
+      const existingTimes = new Set(prev.map((d) => d.time));
+
+      // Filter out duplicates based on time
+      const newUniqueData = data.history.filter((d:any) => !existingTimes.has(d.time));
+
+      // Append new unique data to the end
+      return [...prev, ...newUniqueData];
+    });
+
+    return {
+      totalpage: data.totalPages,
+      currentpage: data.page,
+    };
+  } catch (error) {
+    console.error('Error fetching holder history data:', error);
+    return { totalpage: 0, currentpage: 0 };
+  }
+};
+
+const fetchOlderPlotData = async (
+  page: number
+): Promise<ZoomReport> => {
+  if (!address || !poolID) {
+    console.warn('Missing address or poolID for fetching older holding count.');
+    return { totalpage: 0, currentpage: 0 }; // ✅ fallback ZoomReport
+  }
+
+  try {
+    const res = await fetch(
+      `/api/holder-srs?address=${address}&lps=${poolID}&page=${page}&limit=50`
+    );
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+
+    setPlotData((prev) => {
+      const existingTimestamps = new Set(prev.map(p => p.time));
+      const newPoints = data.srs.filter((point: any) => !existingTimestamps.has(point.timestamp));
+      return [...prev, ...newPoints];
+    });
+    return {
+      totalpage: data.totalPages,
+      currentpage: data.page,
+    };
+ } catch (err) {
+    console.error('Error fetching older data:', err);
+    return { totalpage: 0, currentpage: 0 }; // ✅ fallback value
+  }
+};
+const fetchOlderPlotDS = async (
+  page: number
+): Promise<ZoomReport> => {
+  if (!address || !poolID) {
+    console.warn('Missing address or poolID for fetching older holding count.');
+    return { totalpage: 0, currentpage: 0 }; // ✅ fallback ZoomReport
+  }
+
+  try {
+    const res = await fetch(
+      `/api/holder-srs?address=${address}&lps=${poolID}&page=${page}&limit=50`
+    );
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+
+    setPlotDistribution((prev) => ({
+      whales: { ...prev?.whales, ...data.procssholding.whales },
+      retail: { ...prev?.retail, ...data.procssholding.retail },
+      lps: { ...prev?.lps, ...data.procssholding.lps },
+    }));
+    return {
+      totalpage: data.totalPages,
+      currentpage: data.page,
+    };
+ } catch (err) {
+    console.error('Error fetching older data:', err);
+    return { totalpage: 0, currentpage: 0 }; // ✅ fallback value
+  }
+};
+
+const fetchOlderHoldingCount = async (
+  page: number
+): Promise<ZoomReport> => {
+  if (!address || !poolID) {
+    console.warn('Missing address or poolID for fetching older holding count.');
+    return { totalpage: 0, currentpage: 0 }; // ✅ fallback ZoomReport
+  }
+
+  try {
+    const res = await fetch(
+      `/api/holder-srs?address=${address}&lps=${poolID}&page=${page}&limit=50`
+    );
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+
+    setPlotHoldingCount((prev) => {
+      const safePrev: CategoryHoldings = {
+        whales: prev?.whales || {},
+        retail: prev?.retail || {},
+        lps: prev?.lps || {},
+      };
+
+      return {
+        whales: { ...safePrev.whales, ...data.procssholdingcount.whales },
+        retail: { ...safePrev.retail, ...data.procssholdingcount.retail },
+        lps: { ...safePrev.lps, ...data.procssholdingcount.lps },
+      };
+    });
+
+    return {
+      totalpage: data.totalPages,
+      currentpage: data.page,
+    };
+  } catch (err) {
+    console.error('Error fetching older data:', err);
+    return { totalpage: 0, currentpage: 0 }; // ✅ fallback value
+  }
+};
+
+const fetchSentimentData = async (page:number,funtype:string) : Promise<ZoomReport> => {
+  console.log("Requesting",page,funtype)
+  const res = await fetch(`/api/sentiment?address=${address}&symbol=${allMetadata?.symbol}&page=${page}&limit=20`);
+  const data = await res.json();
+
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch');
+
+  
+  const {sentiMeter,sentiMeterAddr}= data.hype
+  setHypeMeter({
+    sentiMeter,
+    sentiMeterAddr,
+  })
+  setEmojiRawData(prev => {
+
+    const uniqueData = appendUniqueAndSortByTime(prev, data.emojiArray); // or another unique field
+    return uniqueData//.length !== prev.length ? uniqueData : prev;
+  });
+  
+  switch (funtype) {
+    case "twtft":
+      const { tweetFrequencyTrend, tweetsWithAddressFrequency } = data.frequency;
+      setFrequency(prev => ({
+        tweetFrequencyTrend: appendUnique(prev.tweetFrequencyTrend, tweetFrequencyTrend, 'name'),
+        tweetsWithAddressFrequency: appendUnique(prev.tweetsWithAddressFrequency, tweetsWithAddressFrequency, 'name'),
+      }));
+      console.log("twtft",frequency)
+      return  {
+        totalpage: data.meta.totalPages,
+        currentpage: data.meta.currentPage,
+      };
+    case "twt":
+      const {tweetsPerMinuteArray,tweetPerFVmints,tweetsWithAddressCount,totalTweets,averagePercentageFv,averagePercentage} = data.tweetperMinutes;
+      setTweets(prev => ({
+        tweetPerMinut: appendUnique(prev.tweetPerMinut, tweetsPerMinuteArray, 'name'),
+        tweetPerFVmints: appendUnique(prev.tweetPerFVmints, tweetPerFVmints, 'name'),
+        tweetsWithAddressCount:appendUnique(prev.tweetsWithAddressCount, tweetsWithAddressCount, 'name'),
+      }));
+      setValues({
+        totalTweets,
+        averagePercentage,
+        averagePercentageFv,
+      });
+      return  {
+        totalpage: data.meta.totalPages,
+        currentpage: data.meta.currentPage,
+      };
+    case "vlcrt":
+      const {SEI_value,SEI_Velocity,SEI_EMA} = data.SEI;
+
+      setSEI(prev => ({
+       SEI_value: appendUnique(prev.SEI_value, SEI_value, 'name'),
+       SEI_Velocity: appendUnique(prev.SEI_Velocity, SEI_Velocity, 'name'),
+     }));
+     return  {
+      totalpage: data.meta.totalPages,
+      currentpage: data.meta.currentPage,
+    };
+    case "fmgwt":
+      const {tweetFomo,compositFomo,macd,RSI} = data.Fomo;
+      setFomo(prev => ({
+        tweetFomo: appendUnique(prev.tweetFomo, tweetFomo, 'name'),
+        macd: appendUnique(prev.macd, macd, 'name'),
+        RSIx: appendUnique(prev.RSIx, RSI, 'name'),
+      }));
+      return  {
+        totalpage: data.meta.totalPages,
+        currentpage: data.meta.currentPage,
+      };
+    case "impgrw":
+      const {weighBasedImpression,sentimentTrend,EWMA_Value} =data.impression
+      setTweetImpression(prev=>({
+        weighBasedImpression: appendUnique(prev.weighBasedImpression, weighBasedImpression, 'name'),
+        sentimentTrend: appendUnique(prev.sentimentTrend, sentimentTrend, 'time'),
+        EWMA_Value: appendUnique(prev.EWMA_Value, EWMA_Value, 'name'),
+      }))
+      return  {
+        totalpage: data.meta.totalPages,
+        currentpage: data.meta.currentPage,
+      };
+    case "avtwavvw":
+      const {tweetViewsPerFVmints,tweetsWithAddressViews,tweetViewsRatioPercentage,avgViewsPerTweet,tweetwithAddAvgViews} =data.views
+      //console.log("data.impression",data.impression)
+      setViews(prev=>({
+        tweetViewsPerFVmints: appendUnique(prev.tweetViewsPerFVmints, tweetViewsPerFVmints, 'name'),
+        tweetsWithAddressViews: appendUnique(prev.tweetsWithAddressViews, tweetsWithAddressViews, 'name'),
+        tweetViewsRatioPercentage: appendUnique(prev.tweetViewsRatioPercentage, tweetViewsRatioPercentage, 'name'),
+      }))
+
+      setViewsAlt({
+        avgViewsPerTweet,
+        tweetwithAddAvgViews
+      })
+      return  {
+        totalpage: data.meta.totalPages,
+        currentpage: data.meta.currentPage,
+      };
+    default:
+      return { totalpage: 0, currentpage: 0 };
+      
+  }
+  
+}
 
   const [isScriptReady, setIsScriptReady] = useState(false);
   const [isScriptWidgetReady, setIsScriptWidgetReady] = useState(false);
@@ -1272,7 +1121,7 @@ export default function Home() {
           {/* Use flex-grow to push TopTweets to the bottom */}
          
           <div className="">
-            <TopTweets username={usernames} tweets_={tweets} likes={likes} viewscount={viewscount} timestamp={time} profile={profile} />
+            <TopTweets username={usernames} tweets_={utweets} likes={likes} viewscount={viewscount} timestamp={time} profile={profile} />
           </div>
         </section>
           {/* Right Section (Sidebar + OrderBook) */}
@@ -1286,11 +1135,15 @@ export default function Home() {
               holderplot={holderData}
               holderhistroy={holderHistoryData}
               plotdata={plotData}
+              price_plot={totalchartData}
+              plotDistribution={plotDistribution!}
+              plotHoldingCount = {plotHoldigCount!}
+              fetchOlderHoldingCount={fetchHolderMain!}
             />
           </div>  
-          {/* Right Section (Sidebar) */}
+          {/* Right Section (Sidebar) { address, name, twitter, Frequency, Tweets,Values,SEI,FOMO,TweetImpression,Views,ViewsAlt,HypeMeter,holders,live_prx} */}
           <aside className="w-full lg:w-1/2 p-4 border-l border-gray-700 overflow-auto">
-            <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} tweetPerMinut={tweetPerMinute} impression={impressionsData} engagementData={engagementData} engagement={engaments} tweetEngagemnt={tweetEngagment} tweetViews={tweetViewsPerMinute} sentimentPlot={sentimentTimeSeries} tweetsWithAddress={tweetsWithAddress} holders={holderRawData} live_prx={livePrice}/>
+          <MetricsGrid address={address} name={metadata_?.image} twitter={metadata_?.twitter} Frequency={frequency} Tweets={tweets} Values={values} SEI={sei} FOMO={fomo} TweetImpression={tweetImpression} Views={views} ViewsAlt={viewsAlt} HypeMeter={hypeMeter} holders={holderRawData} live_prx={livePrice} fetchOlderHoldingCount={fetchSentimentData}/>
           </aside>
           </div>
         </main>

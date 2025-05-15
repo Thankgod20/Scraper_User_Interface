@@ -1,5 +1,5 @@
 // components/HoldersChart.tsx
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo ,useRef} from 'react';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -10,27 +10,39 @@ import {
   Tooltip,
   Line,
   Legend,
-  ReferenceLine
+  ReferenceLine,
+  Brush
 } from 'recharts';
 
 interface HolderDataPoint {
   holders: number;
   time: string;
 }
-
+type ZoomReport = {
+  totalpage: number;
+  currentpage: number;
+};
 interface HoldersChartProps {
   data: HolderDataPoint[];
   title?: string;
   theme?: 'light' | 'dark';
+  funtype:string;
+  onZoomOrPan?: (page: number, funtype:string) => Promise<ZoomReport>;
 }
 
 const HoldersChart: React.FC<HoldersChartProps> = ({
   data,
+  funtype,
   title = "Open Interest: Holders Over Time",
-  theme = 'light'
+  theme = 'light',
+  onZoomOrPan
 }) => {
   const [activePoint, setActivePoint] = useState<number | null>(null);
-  
+    const [isLoaded, setIsLoaded] = useState(true);
+    const [isEnd, setIsEnd] = useState(false);
+    const pageRef = useRef(2);
+    const totalPage = useRef(0);
+    const throttleRef = useRef(false);
   // Process and format data
   const formattedData = useMemo(() => {
     if (!data || data.length === 0) return [];
@@ -208,6 +220,48 @@ const HoldersChart: React.FC<HoldersChartProps> = ({
                 strokeDasharray="3 3" 
               />
             )}
+            <Brush
+              dataKey="formattedTime"
+              height={30}
+              stroke={colors.primary}
+              travellerWidth={10}
+              startIndex={pageRef.current >= totalPage.current
+                ? 0
+                : Math.max(0, formattedData.length - (formattedData.length-5))}  // show last 20 points
+              endIndex={formattedData.length - 1}
+              onChange={async(range) => {
+                pageRef.current =formattedData.length/50
+                if (range && typeof range.startIndex === 'number' && typeof range.endIndex === 'number' && !isEnd) {
+                  
+                  const start = formattedData[range.startIndex];
+                  const end = formattedData[range.endIndex];
+                  //console.log("onZoomOrPan",onZoomOrPan)
+                  if (start && end && onZoomOrPan && range.startIndex <2 && isLoaded && !throttleRef.current) {
+                    throttleRef.current= true
+                    setIsLoaded(false);
+                    
+                    const report = await onZoomOrPan(pageRef.current,funtype); // Call external fetch 
+                    console.log('Brush range:', report)
+                    if (report?.totalpage > 0) {
+                      totalPage.current = report.totalpage;
+                      if (report.totalpage > pageRef.current) {
+                        pageRef.current = report.currentpage+1;
+                        console.log('Updated page:', pageRef.current);
+                      } else {
+                        setIsEnd(true);
+                      }
+                      
+                      setIsLoaded(true); // ✅ use React state setter
+                      setTimeout(() => {
+                        throttleRef.current = false;
+                      }, 1000);
+                    }
+                   // console.log('Brush range:', report)
+                  }
+                }
+              }}
+            />
+
           </AreaChart>
         </ResponsiveContainer>
       </div>

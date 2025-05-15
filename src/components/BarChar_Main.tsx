@@ -29,7 +29,7 @@ const CustomTooltip = ({ active, payload }: any) => {
 
 const BarGraph_Main: React.FC<BarChartProps> = ({ data }) => {
   const [chartData, setChartData] = useState<any[]>([]);
-  
+  data.sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
   useEffect(() => {
     // Process the incoming data to track previous values
     const newChartData = data.map((item, index) => {

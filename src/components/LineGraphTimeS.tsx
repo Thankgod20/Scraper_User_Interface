@@ -27,6 +27,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 const LineGraphTimeS: React.FC<LineGraphProps> = ({ data, color = "#10B981" }) => {
+  data.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
   return (
     <ResponsiveContainer width="100%" height={300}>
       <LineChart data={data}>
