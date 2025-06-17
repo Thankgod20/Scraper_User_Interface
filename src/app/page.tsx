@@ -2,10 +2,9 @@
 import React, { useEffect, useState } from "react";
 import Header from '@/components/Header';
 import AboutToGraduateSection from '@/components/AbtGrd';
-import NewlyCreatedSection from '@/components/NewlyCreated';
 import { useNotificationPermission } from "../../hooks/useNotification";
 import UITable from '@/components/UITable'; // Import the new UITable component
-import { notify } from "./utils/notify";
+
 interface Impression {
   name: string;
   value: number;
@@ -23,7 +22,7 @@ export default function Home() {
   const [impressionsData, setImpressionsData] = useState<CompImpression[][]>([]);
   const [usernames, setUsernames] = useState<string[][]>([]);
   const [tweets, setTweets] = useState<string[][]>([]);
-  const [viewCounts, setViewCounts] = useState<string[][]>([]); // Adding viewCounts state
+  //const [viewCounts, setViewCounts] = useState<string[][]>([]); // Adding viewCounts state
   const [tweetPerMinute, setTweetsPerMinuteData] = useState<Impression[][]>([]);
   const parseViewsCount = (views: string): number => {
     if (views.endsWith('K')) {
@@ -135,16 +134,16 @@ export default function Home() {
           continue;  // go on to the next address
         }
         // Process data to calculate total views for each unique time
-        const viewCounts: { [key: string]: number } = {};
+       // const viewCounts: { [key: string]: number } = {};
         const extractedUsernames: string[] = [];
         const extractedTweets: string[] = [];
         const extractedViews: string[] = []; // Array for storing view counts
-        const validEntries = jsonData.filter((entry: any) => {
+        const validEntries = jsonData.filter((entry: { tweet: string; params: { time: string[]; views: string[] }; post_time: string; status: string }) => {
           
           return entry.tweet && (entry.tweet.includes(address.address) || entry.tweet.includes(metadata[index]?.symbol));
         });
-        validEntries.forEach((entry: any) => {
-          const times = entry.params.time;
+        validEntries.forEach((entry: { tweet: string; params: { time: string[]; views: string[] }; post_time: string; status: string }) => {
+          //const times = entry.params.time;
           const views = entry.params.views;
           const timestamp = entry.post_time
           const statusUrl = entry.status;
@@ -221,7 +220,7 @@ export default function Home() {
       setUsernames(extractedNestedUsernames);
       setTweetsPerMinuteData(tweetnNestedArry);
       setTweets(extractedNestedTweets);
-      setViewCounts(extractedNestedViewCounts); // Set the view counts state
+      //setViewCounts(extractedNestedViewCounts); // Set the view counts state
     };
 
     fetchData();

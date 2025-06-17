@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     }
 
     // Assuming you want the first pool's id
-    let rawPoolId: string = poolData[0].id;
+    const rawPoolId: string = poolData[0].id;
     // Remove the "solana_" prefix if present
     const poolId = rawPoolId.startsWith("solana_")
       ? rawPoolId.replace("solana_", "")

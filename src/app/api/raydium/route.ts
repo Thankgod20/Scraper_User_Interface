@@ -13,29 +13,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // Step 1: Fetch pool data using the token address
-    const poolUrl = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${address}/pools`;
-    const poolResponse = await axios.get(poolUrl);
-    const poolData = poolResponse.data?.data;
-
-    if (!poolData || poolData.length === 0) {
-      return NextResponse.json(
-        { error: "No pool data found for the provided address" },
-        { status: 404 }
-      );
-    }
-
-    // Assuming you want the first pool's id
-    let rawPoolId: string = poolData[0].id;
-    // Remove the "solana_" prefix if present
-    const poolId = rawPoolId.startsWith("solana_")
-      ? rawPoolId.replace("solana_", "")
-      : rawPoolId;
-
+    const hostname = process.env.DATA_HOST ?? 'localhost';
+    console.log("hostname", hostname)
     // Step 2: Fetch OHLCV data for the pool using the poolId
-    const ohlcvUrl = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolId}/ohlcv/minute?aggregate=1&limit=1000¤cy=USD`;
+    const ohlcvUrl = `http://${hostname}:3300/get-ohlcv?poolId=${address}`;
+    console.log("URL TOser",ohlcvUrl)
     const ohlcvResponse = await axios.get(ohlcvUrl);
-
+    const poolId =ohlcvResponse.data.meta.poolID
     // Return the OHLCV data as JSON
     return NextResponse.json({poolId,ohlcv:ohlcvResponse.data}, { status: 200 });
   } catch (error: any) {

@@ -32,6 +32,7 @@ interface CumulativeDataPoint {
 type VoronoiDataPoint = [number, number, CumulativeDataPoint];
 
 const MarketDepthChart: React.FC<MarketDepthChartProps> = ({ orderBookData, livePriceData }) => {
+  //console.log("Daa",orderBookData)
   const svgRef = useRef<SVGSVGElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   // Track active tooltip data

@@ -22,14 +22,14 @@ export interface RawTradeData {
   volume: number;  // Trading volume
 }
 export interface IDataFeed {
-  onReady: (callback: (config: any) => void) => void;
+  onReady: (callback: (config: unknown) => void) => void;
   resolveSymbol: (
     symbolName: string,
-    onSymbolResolvedCallback: (symbolInfo: any) => void,
-    onResolveErrorCallback: (error: any) => void
+    onSymbolResolvedCallback: (symbolInfo: unknown) => void,
+    onResolveErrorCallback: (error: unknown) => void
   ) => void;
   getBars: (
-    symbolInfo: any,
+    symbolInfo: string,
     resolution: string,
     periodParams: {
       from: number;
@@ -40,10 +40,10 @@ export interface IDataFeed {
     //from: number,
     //to: number,
     onHistoryCallback: (bars: CandleData[], meta: { noData: boolean }) => void,
-    onErrorCallback: (error: any) => void
+    onErrorCallback: (error: unknown) => void
   ) => void;
   subscribeBars: (
-    symbolInfo: any,
+    symbolInfo: string,
     resolution: string,
     onRealtimeCallback: (bar: CandleData) => void,
     subscribeUID: string,

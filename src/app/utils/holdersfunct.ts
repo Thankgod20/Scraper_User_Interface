@@ -1,5 +1,4 @@
-import { RawTradeData } from "../types/TradingView";
-import { SmoothingMethod,StochRSIOptions,HolderDataPoint,AnalysisResult,PlotDataByAddress,SellOffRisk,TimeSeriesOutput,HolderDerivatives,DerivativePoint,Holder,CategoryHoldings,Impression ,MACDPoint,Engagement,MetricsBin,EngagementImpression,TimeSeriess,CompImpression} from "./app_types";
+import { SmoothingMethod,StochRSIOptions,HolderDataPoint,AnalysisResult,PlotDataByAddress,SellOffRisk,TimeSeriesOutput,HolderDerivatives,DerivativePoint,Holder,CategoryHoldings,Impression ,MACDPoint,Engagement,MetricsBin,EngagementImpression,TimeSeriess,CompImpression,BuyActivity} from "./app_types";
 import vader from 'vader-sentiment';
 
 /**
@@ -8,8 +7,22 @@ import vader from 'vader-sentiment';
  * @param lpAddresses Optional set of LP addresses
  * @returns Categorized aggregated holdings by timestamp
  */
-import { parseISO, formatISO, startOfMinute, addMinutes } from 'date-fns';
-
+import { parseISO, formatISO, startOfMinute } from 'date-fns';
+interface TweetEntry {
+  tweet: string;
+  params: {
+    time: number[];
+    views: string[];
+    likes: string[];
+    comment: string[];
+    retweet: string[];
+    plot_time: number[];
+  };
+  post_time: string;
+  status: string;
+  profile_image?: string;
+  followers: number;
+}
 export function processHoldings(
   holders: Holder[],
   lpAddresses: Set<string> = new Set(),
@@ -419,7 +432,7 @@ export function processHolderCounts(
           i > 0 && prev !== 0 ? (point.holders - prev) / prev : undefined;
         const firstDifference = i > 0 ? point.holders - prev : undefined;
     
-        let rollingSlice = holderHistory.slice(
+        const rollingSlice = holderHistory.slice(
           Math.max(0, i - windowSize + 1),
           i + 1
         );
@@ -527,12 +540,374 @@ export function processHolderCounts(
     }
     
 */
+
+
+export function computeBuyActivityScore(
+  holders_: PlotDataByAddress[],
+  timeWindow: number = 1,
+  lpAddresses: Set<string> = new Set(),
+  smallWalletThreshold: number = 9_000_000,
+  whaleThreshold: number = 10_000_000,
+  weights: { w1: number; w2: number; w3: number } = { w1: 0.4, w2: 0.3, w3: 0.3 }
+): BuyActivity[] {
+  const holders = holders_.filter(h => !lpAddresses.has(h.address));
+  if (holders.length === 0) return [];
+
+  const { w1, w2, w3 } = weights;
+  const addressSet = new Set(holders.map(h => h.address));
+
+  // Collect all timestamps
+  const timestampSet = new Set<string>();
+  for (const h of holders) {
+    for (const d of h.data) {
+      if (d?.time) timestampSet.add(d.time);
+    }
+  }
+  const allTimestamps = Array.from(timestampSet).sort();
+
+  // Index holder data
+  const holderTimeMap: Record<string, Record<string, number>> = {};
+  for (const h of holders) {
+    holderTimeMap[h.address] = {};
+    for (const d of h.data) {
+      holderTimeMap[h.address][d.time] = d.amount;
+    }
+  }
+
+  const results: BuyActivity[] = [];
+
+  for (let t = 0; t < allTimestamps.length; t++) {
+    const time = allTimestamps[t];
+    const prevTime = t >= timeWindow ? allTimestamps[t - timeWindow] : null;
+
+    let uniqueBuyers = 0;
+    let netGrowth = 0;
+    let smallWalletGrowth = 0;
+
+    let retailEntrants = 0;
+    let retailExits = 0;
+    let whaleEntrants = 0;
+    let whaleExits = 0;
+
+    for (const address of addressSet) {
+      const prevAmt = prevTime ? holderTimeMap[address][prevTime] ?? 0 : 0;
+      const currAmt = holderTimeMap[address][time] ?? 0;
+      const delta = currAmt - prevAmt;
+
+      if (delta > 10000) {
+        uniqueBuyers++;
+        netGrowth += delta;
+
+        if (currAmt <= smallWalletThreshold) {
+          smallWalletGrowth += delta;
+          retailEntrants++;
+        } else if (currAmt >= whaleThreshold) {
+          whaleEntrants++;
+        }
+      } else if (delta < 0) {
+        if (prevAmt <= smallWalletThreshold) {
+          retailExits++;
+        } else if (prevAmt >= whaleThreshold) {
+          whaleExits++;
+        }
+      }
+    }
+
+    const diversityScore = netGrowth > 0 ? smallWalletGrowth / netGrowth : 0.0;
+
+    const retailChurnRatio =
+      retailEntrants > 0 ? parseFloat((retailExits / retailEntrants).toFixed(2)) : 0;
+    const whaleChurnRatio =
+      whaleEntrants > 0 ? parseFloat((whaleExits / whaleEntrants).toFixed(2)) : 0;
+
+    const buyScore = parseFloat(
+      (w1 * uniqueBuyers + w2 * netGrowth + w3 * diversityScore).toFixed(4)
+    );
+
+    results.push({
+      time,
+      uniqueBuyers,
+      netGrowth: parseFloat(netGrowth.toFixed(2)),
+      diversityScore: parseFloat(diversityScore.toFixed(4)),
+      buyScore,
+      retailChurnRatio,
+      whaleChurnRatio
+    });
+  }
+
+  return results;
+}
+export interface EnhancedSellOffRisk extends SellOffRisk {
+  whaleRetailRatio: number;
+  sustainabilityScore: number;
+}
+
+export function computeWhaleExitRiskScore(
+  holders_: PlotDataByAddress[],
+  getLiquidity: (time: string) => number,
+  sellWindow: number = 1,
+  lpAddresses: Set<string> = new Set(),
+  weights: { w1: number; w2: number; w3: number; w4: number } = { w1: 0.2, w2: 0.3, w3: 0.3, w4: 0.2 },
+  whaleThreshold: number = 10_000_000,
+  retailThreshold: number = 1000,
+  sustainabilityThreshold: number = 1.2
+): EnhancedSellOffRisk[] {
+  const holders = holders_.filter(h => !lpAddresses.has(h.address));
+  if (holders.length === 0) return [];
+
+  const numHolders = holders.length;
+  const lnN = Math.log(numHolders);
+  const { w1, w2, w3, w4 } = weights;
+  const results: EnhancedSellOffRisk[] = [];
+
+  // Collect timestamps
+  const timestampSet = new Set<string>();
+  for (const h of holders) {
+    for (const d of h.data) {
+      if (d?.time) timestampSet.add(d.time);
+    }
+  }
+  const allTimestamps = Array.from(timestampSet).sort();
+
+  // Index by address/time
+  const holderTimeMap: Record<string, Record<string, number>> = {};
+  for (const h of holders) {
+    holderTimeMap[h.address] = {};
+    for (const d of h.data) {
+      holderTimeMap[h.address][d.time] = d.amount;
+    }
+  }
+
+  for (let t = 0; t < allTimestamps.length; t++) {
+    const time = allTimestamps[t];
+
+    // --- 1. Entropy Calculation ---
+    const totalAmount = holders.reduce((sum, h) => {
+      const amt = holderTimeMap[h.address][time] ?? 0;
+      return sum + amt;
+    }, 0);
+
+    const pList = holders.map(h => {
+      const amt = holderTimeMap[h.address][time] ?? 0;
+      return totalAmount > 0 ? amt / totalAmount : 0;
+    });
+
+    const entropy = -pList.reduce((sum, p) => (p > 0 ? sum + p * Math.log(p) : sum), 0);
+    const concentrationRisk = lnN > 0 ? 1 - entropy / lnN : 0;
+
+    // --- 2. Coordinated Sell Detection ---
+    let sellers = 0;
+    if (t >= sellWindow) {
+      const prevTime = allTimestamps[t - sellWindow];
+      for (const h of holders) {
+        const prevAmt = holderTimeMap[h.address][prevTime] ?? 0;
+        const currAmt = holderTimeMap[h.address][time] ?? 0;
+        const dropRatio = prevAmt > 0 ? (prevAmt - currAmt) / prevAmt : 0;
+        if (dropRatio >= 0.05) sellers++;
+      }
+    }
+    const sellOffRatio = numHolders > 0 ? sellers / numHolders : 0;
+    const coordinatedSellFlag = sellOffRatio >= 0.3 ? 1 : 0;
+
+    // --- 3. Whale Liquidity Risk ---
+    const liq = getLiquidity(time);
+    const whaleHoldings = holders.reduce((sum, h) => {
+      const amt = holderTimeMap[h.address][time] ?? 0;
+      return amt > whaleThreshold ? sum + amt : sum;
+    }, 0);
+    const liquidityRisk = liq > 0 ? Math.min(whaleHoldings / liq, 1) : 0;
+
+    // --- 4. Whale vs Retail Flow ---
+    let retailFlow = 0;
+    let whaleFlow = 0;
+
+    if (t >= sellWindow) {
+      const prevTime = allTimestamps[t - sellWindow];
+      for (const h of holders) {
+        const prevAmt = holderTimeMap[h.address][prevTime] ?? 0;
+        const currAmt = holderTimeMap[h.address][time] ?? 0;
+        const delta = currAmt - prevAmt;
+
+        if (currAmt > whaleThreshold) {
+          whaleFlow += delta;
+        } else if (currAmt <= retailThreshold) {
+          retailFlow += delta;
+        }
+      }
+    }
+
+    const rawSustainability = retailFlow > 0
+      ? (retailFlow - Math.abs(whaleFlow)) / retailFlow
+      : 0;
+
+    const sustainabilityScore = Math.min(Math.max(rawSustainability, 0), 1);
+
+    const whaleRetailRatio = retailFlow !== 0
+      ? Math.abs(whaleFlow) / retailFlow
+      : Infinity;
+
+    const sustainabilityFlag = whaleRetailRatio > sustainabilityThreshold ? 1 : 0;
+
+    // --- Final Risk Score ---
+    const srs = w1 * (1 / Math.max(concentrationRisk, 0.001)) +
+                w2 * coordinatedSellFlag +
+                w3 * liquidityRisk +
+                w4 * sustainabilityFlag;
+
+    results.push({
+      time,
+      entropy: parseFloat(concentrationRisk.toFixed(4)),
+      plateauRatio: parseFloat(sellOffRatio.toFixed(4)),
+      liquidityRisk: parseFloat(liquidityRisk.toFixed(4)),
+      whaleRetailRatio: parseFloat(whaleRetailRatio.toFixed(2)),
+      sustainabilityScore: parseFloat(sustainabilityScore.toFixed(2)),
+      srs: parseFloat(srs.toFixed(4)),
+    });
+  }
+
+  return results;
+}
+/*
 export function computeSellOffRiskScore(
   holders_: PlotDataByAddress[],
   getLiquidity: (time: string) => number,
   sellWindow: number = 1,
   lpAddresses: Set<string> = new Set(),
   weights: { w1: number; w2: number; w3: number } = { w1: 0.2, w2: 0.3, w3: 0.5 },
+  whaleThreshold: number = 10_000_000,
+  coordinatedSellThreshold: number = 0.2
+): SellOffRisk[] {
+  // --- Utility Functions ---
+  const calculateDuplicationScore = (amounts: number[], totalHolders: number): number => {
+    const amountCounts = new Map<number, number>();
+    amounts.forEach(amt =>
+      amountCounts.set(amt, (amountCounts.get(amt) || 0) + 1)
+    );
+
+    let collisionProbability = 0;
+    amountCounts.forEach(count => {
+      if (count > 1) {
+        collisionProbability += (count * (count - 1)) / (totalHolders * (totalHolders - 1));
+      }
+    });
+    return collisionProbability;
+  };
+
+  const getFirstTxTimes = (holders: PlotDataByAddress[]): Record<string, string> => {
+    const firstTxMap: Record<string, string> = {};
+    holders.forEach(h => {
+      firstTxMap[h.address] = h.data.reduce(
+        (minTime, d) => (d.time < minTime ? d.time : minTime),
+        h.data[0].time
+      );
+    });
+    return firstTxMap;
+  };
+
+  // --- Filter and Setup ---
+  const holders = holders_.filter(h => !lpAddresses.has(h.address));
+  if (holders.length === 0) return [];
+
+  const numHolders = holders.length;
+  const lnN = Math.log(numHolders);
+  const { w1, w2, w3 } = weights;
+  const results: SellOffRisk[] = [];
+
+  // --- Timestamps ---
+  const timestampSet = new Set<string>();
+  for (const h of holders) {
+    for (const d of h.data) {
+      if (d?.time) timestampSet.add(d.time);
+    }
+  }
+  const allTimestamps = Array.from(timestampSet).sort(); // ISO strings sort
+
+  // --- Holder-Time Mapping ---
+  const holderTimeMap: Record<string, Record<string, number>> = {};
+  for (const h of holders) {
+    holderTimeMap[h.address] = {};
+    for (const d of h.data) {
+      holderTimeMap[h.address][d.time] = d.amount;
+    }
+  }
+
+  // --- First TX Times (for Sybil detection) ---
+  const firstTxTimes = getFirstTxTimes(holders);
+
+  // --- Loop per timestamp ---
+  for (let t = 0; t < allTimestamps.length; t++) {
+    const time = allTimestamps[t];
+
+    // --- Total token supply at this timestamp
+    const totalAmount = holders.reduce((sum, h) => {
+      const amt = holderTimeMap[h.address][time] ?? 0;
+      return sum + amt;
+    }, 0);
+
+    // --- 1. Entropy + Sybil Resistance ---
+    const amounts = holders.map(h => holderTimeMap[h.address][time] ?? 0);
+    const pList = amounts.map(amt => (totalAmount > 0 ? amt / totalAmount : 0));
+
+    const entropy = -pList.reduce((sum, p) => (p > 0 ? sum + p * Math.log(p) : sum), 0);
+
+    const duplicationScore = calculateDuplicationScore(amounts, holders.length);
+
+    const newWallets24h = Object.values(firstTxTimes).filter(firstSeen =>
+      new Date(firstSeen) > new Date(new Date(time).getTime() - 86400000)
+    ).length;
+
+    const newWalletFlood = Math.min(newWallets24h / (holders.length * 0.05), 1); // 5% cap
+
+    const sybilAdjustedEntropy = entropy * (1 - 0.6 * duplicationScore) * (1 - 0.4 * newWalletFlood);
+    const concentrationRisk = lnN > 0 ? 1 - sybilAdjustedEntropy / lnN : 0;
+
+    // --- 2. Coordinated Sell-Off Risk ---
+    let sellers = 0;
+    if (t >= sellWindow) {
+      const prevTime = allTimestamps[t - sellWindow];
+      for (const h of holders) {
+        const prevAmt = holderTimeMap[h.address][prevTime] ?? 0;
+        const currAmt = holderTimeMap[h.address][time] ?? 0;
+        const dropRatio = prevAmt > 0 ? (prevAmt - currAmt) / prevAmt : 0;
+        if (dropRatio >= 0.05) sellers++;
+      }
+    }
+
+    const sellOffRatio = numHolders > 0 ? sellers / numHolders : 0;
+    const coordinatedSellFlag = sellOffRatio >= coordinatedSellThreshold ? 1 : 0;
+
+    // --- 3. Whale Liquidity Risk ---
+    const liq = getLiquidity(time);
+    const whaleHoldings = holders.reduce((sum, h) => {
+      const amt = holderTimeMap[h.address][time] ?? 0;
+      return amt > whaleThreshold ? sum + amt : sum;
+    }, 0);
+    const liquidityRisk = liq > 0 ? Math.min(whaleHoldings / liq, 1) : 0;
+
+    // --- Final Score ---
+    const srs = w1 * (1 / Math.max(concentrationRisk, 0.001)) +
+                w2 * coordinatedSellFlag +
+                w3 * liquidityRisk;
+
+    results.push({
+      time,
+      entropy: parseFloat(concentrationRisk.toFixed(4)),
+      plateauRatio: parseFloat(sellOffRatio.toFixed(4)),
+      liquidityRisk: parseFloat(liquidityRisk.toFixed(4)),
+      srs: parseFloat(srs.toFixed(4)),
+    });
+  }
+
+  return results;
+}
+*/
+
+export function computeSellOffRiskScore(
+  holders_: PlotDataByAddress[],
+  getLiquidity: (time: string) => number,
+  sellWindow: number = 1,
+  lpAddresses: Set<string> = new Set(),
+  weights: { w1: number; w2: number; w3: number } = { w1: 0.2, w2: 0.2, w3: 0.6 },
   whaleThreshold: number = 10_000_000,
   coordinatedSellThreshold: number = 0.3
 ): SellOffRisk[] {
@@ -590,7 +965,7 @@ export function computeSellOffRiskScore(
         const prevAmt = holderTimeMap[h.address][prevTime] ?? 0;
         const currAmt = holderTimeMap[h.address][time] ?? 0;
         const dropRatio = prevAmt > 0 ? (prevAmt - currAmt) / prevAmt : 0;
-        if (dropRatio >= 0.2) sellers++;
+        if (dropRatio >= 0.05) sellers++;
       }
     }
 
@@ -606,7 +981,7 @@ export function computeSellOffRiskScore(
     const liquidityRisk = liq > 0 ? Math.min(whaleHoldings / liq, 1) : 0;
 
     // --- Final Score
-    const srs = w1 * concentrationRisk + w2 * coordinatedSellFlag + w3 * liquidityRisk;
+    const srs = w1 * (concentrationRisk) + w2 * coordinatedSellFlag + w3 * liquidityRisk;
 
     results.push({
       time,
@@ -835,7 +1210,16 @@ export function computeSellOffRiskScore(
   
       for (const holder of derivatives) {
         const current = holder.series[i];
-        const initialAmount = (holder as any).initialAmount ?? holder.series[0]?.roc;
+        // Properly type and null-check the initialAmount
+        const holderWithInitial = holder as Record<string, unknown>;
+        const rawInitialAmount = holderWithInitial.initialAmount;
+        const fallbackAmount = holder.series[0]?.roc;
+        
+        // Ensure we have a valid number for comparison
+        const initialAmount = typeof rawInitialAmount === 'number' 
+          ? rawInitialAmount 
+          : (typeof fallbackAmount === 'number' ? fallbackAmount : 0);
+        
         const isWhale = holder.series[i - 1]?.roc !== null && initialAmount > threshold;
   
         if (
@@ -852,7 +1236,6 @@ export function computeSellOffRiskScore(
   
     return signals;
   }
-
 /**
  * Computes MACD, Signal, and Histogram for a FOMO time series.
  *
@@ -913,7 +1296,7 @@ export function computeImpressionsTimeSeries(
   N_baseline: number = 500
 ): Impression[] {
   if (tweets.length === 0) return [];
-  const totalvolume = tweets.length;  
+  //const totalvolume = tweets.length;  
   // Sort tweets by timestamp
   const sortedTweets = [...tweets].sort(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
@@ -1096,7 +1479,7 @@ export function computeMetricsBins(
 
   // step 3: compute RES = (E - MA)/MA over the last resWindow bins
   const results: MetricsBin[] = [];
-  const engSeries = sorted.map(b => b.sei * sorted[0].count); // rebuild raw E for RES MA
+  //const engSeries = sorted.map(b => b.sei * sorted[0].count); // rebuild raw E for RES MA
   // actually, for RES we want raw engagement sum: use sumEng directly, so reconstruct array:
   const rawEng = Array.from(bins.entries())
     .map(([timeMs, agg]) => ({ timeMs, eng: agg.sumEng }))
@@ -2094,7 +2477,7 @@ export const parseViewsCount = (views: string): number => {
   }
   return parseFloat(views); // For plain numbers
 };
-export function parseISOLocal(s:any) {
+export function parseISOLocal(s: string) {
   const [year, month, day, hour, minute, second] = s.split(/\D/).map(Number);
   return new Date(year, month - 1, day, hour, minute, second);
 }
@@ -2205,7 +2588,7 @@ export function categorizeEngagementByInterval(
 }
 
 // Calculate weighted engagement growth across all buckets
-export function calculateEngagementGrowth(data: Engagement[], intervalMinutes: number, maxPerMin: number = 500): number {
+export function calculateEngagementGrowth(data: Engagement[]/*, intervalMinutes: number, maxPerMin: number = 500*/): number {
   if (data.length === 0) return 0;
 
   const weights = { impressions: 0.1, likes: 0.3, retweets: 0.4, comments: 0.2 };
@@ -2252,39 +2635,8 @@ const preprocessText = (text:string) => {
   });
   return processedText;
 };
-const options = {
-  extras: {
-    // Single words & tokens for phrases
-    'bundles': -15,
-    'control': -15,
-    'manipulate': -13,
-    'market': -2,
-    'doesn\'t_look': -12,
-    'SCAM': -15,
-    'scam': -15,
-    'dump': -13,
-    'rug': -15,
-    'dex': 2,
-    'KOL': 2,
-    'bullish': 2,
-    'paid': 3,
-    '1x': 2,
-    '2x': 2,
-    '3x': 2,
-    '4x': 2,
-    '5x': 2,
-    '10x': 2,
-    '100x': 2,
-    '1000x': 2,
-    'moon': 2,
-    // Additional phrases can be added here
-    'not_safe': -13,
-    'poor_quality': -14,
-    'high_risk': -15,
-    'low_confidence': -13,
-  }
-};
-  export const computeSentimentTimeSeries = (tweetData: any[]) => {
+
+  export const computeSentimentTimeSeries = (tweetData: TweetEntry[]) => {
     const sentimentByTime: { [time: string]: { totalSentiment: number, weight: number } } = {};
     tweetData.forEach((entry) => {
       const text = entry.tweet;

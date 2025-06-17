@@ -148,7 +148,7 @@ const HoldersChart: React.FC<HoldersChartProps> = ({
       </div>
     );
   }
-  
+  //pageRef.current =formattedData.length/50
   return (
     <div className="rounded-lg p-4 max-w-3xl mx-auto">
       <h2 className="text-xl font-bold mb-4" style={{ color: colors.text }}>
@@ -230,7 +230,7 @@ const HoldersChart: React.FC<HoldersChartProps> = ({
                 : Math.max(0, formattedData.length - (formattedData.length-5))}  // show last 20 points
               endIndex={formattedData.length - 1}
               onChange={async(range) => {
-                pageRef.current =formattedData.length/50
+                
                 if (range && typeof range.startIndex === 'number' && typeof range.endIndex === 'number' && !isEnd) {
                   
                   const start = formattedData[range.startIndex];

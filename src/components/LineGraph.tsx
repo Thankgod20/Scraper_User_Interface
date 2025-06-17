@@ -83,7 +83,7 @@ const LineGraph: React.FC<LineGraphProps> = ({ data, color = "#10B981",funtype,o
                         }
                     }
                     }}
-                            />
+                />
             </LineChart>
         </ResponsiveContainer>
     );

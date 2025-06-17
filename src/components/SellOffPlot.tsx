@@ -48,6 +48,7 @@ export default function SRSChart({
     const pageRef = useRef(1);
     const totalPage = useRef(0);
     const throttleRef = useRef(false);
+    //pageRef.current =data.length/50
   return (
     <div className={`w-full h-[460px] p-4 rounded-lg ${darkMode ? "" : "bg-white"}`}>
       <h3 className={`text-lg font-semibold mb-2 ${darkMode ? "text-white" : "text-gray-800"}`}>
@@ -119,7 +120,7 @@ export default function SRSChart({
                   :Math.max(0, data.length - (data.length-2))}  // show last 20 points
                 endIndex={data.length - 1}
                 onChange={async(range) => {
-                  pageRef.current =data.length/50
+                  
                   if (range && typeof range.startIndex === 'number' && typeof range.endIndex === 'number' && !isEnd) {
                     
                     const start = data[range.startIndex];

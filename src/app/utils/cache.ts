@@ -4,10 +4,11 @@ import {
     processHoldings,
     processHolderCounts
   } from './holdersfunct';
-  import { CategoryHoldings } from './app_types';
+  import { CategoryHoldings,SellOffRisk } from './app_types';
   
-  const getLiquidity = (time: string) => 1_000_000_000;
-  
+  //const getLiquidity = (_time: string) => 1_000_000_000;
+  const getLiquidity = () => 1_000_000_000;
+
   export interface Holder {
     address: string;
     amount: number[];
@@ -17,7 +18,7 @@ import {
   export type CacheEntry = {
     timestamp: number;
     data: {
-      srs: any[];
+      srs: SellOffRisk[];
       procssholding: CategoryHoldings;
       procssholdingcount: CategoryHoldings;
     };

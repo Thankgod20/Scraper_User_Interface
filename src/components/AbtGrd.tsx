@@ -5,12 +5,14 @@ interface Impression {
   name: string;
   value: number;
 }
-
+interface Address {
+  address: string;
+}
 interface AboutToGraduateSectionProps {
-  addresses: any[];
+  addresses: Address[];
   othermetadata: { image: string; name: string; symbol: string }[];
   usrname: string[][];
-  tweets: any[][];
+  tweets: string[][];
   impressionsData: Impression[][];
 }
 
@@ -40,7 +42,7 @@ const AboutToGraduateSection: React.FC<AboutToGraduateSectionProps> = ({
       <div className="flex overflow-x-auto space-x-4">
         {cardsData.map((card, index) => (
           <Card
-            key={card.address + index}
+            key={card.address.address + index}
             imageSrc={card.metadata.image}
             tkName={card.metadata.name}
             tkSymbl={card.metadata.symbol}

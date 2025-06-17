@@ -1,5 +1,4 @@
-import React, { JSX, useState, useEffect,ReactNode } from 'react';
-import { CandleData, RawTradeData } from '@/app/types/TradingView';
+import  { ReactNode } from 'react';
 export type DerivativePoint = {
     time: string;
     roc: number | null;
@@ -10,6 +9,34 @@ export type DerivativePoint = {
     entropy: number;
     plateauRatio: number;
     liquidityRisk: number;
+    srs: number;
+  };
+  export interface EnhancedSellOffRiskK {
+    time: string;
+    concentrationRisk: number;
+    whaleRisk: number;
+    liquidityRisk: number;
+    priceImpact: number;
+    sellPressure: number;
+    combinedScore: number;
+  }
+  export interface BuyActivity {
+    time: string;
+    uniqueBuyers: number;
+    netGrowth: number;
+    diversityScore: number;
+    buyScore: number;
+    retailChurnRatio: number;
+    whaleChurnRatio: number;
+  }
+  export type SellOffRiskK = {
+    time: string;
+    entropy: number;
+    plateauRatio: number;
+    liquidityRisk: number;
+    whaleSellPressure: number;
+    liquidityTrend: number;
+    volumeSoldRatio: number;
     srs: number;
   };
   export interface StochRSIOptions {
@@ -81,7 +108,17 @@ export interface CategoryHoldings {
   lps: TimeSeries;
 }
 
-
+export interface ChartData {
+  timestamps: string[];
+  prices: {
+    timestamps: string[]; // OHLCV-native timestamps
+    values: number[];
+  };
+  inflow: Record<string, number[]>;
+  outflow: Record<string, number[]>;
+  netflow: Record<string, number[]>;
+  activeHolders: Record<string, number[]>;
+}
 export interface CompImpression {
   name: string;
   value: number;

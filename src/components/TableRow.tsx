@@ -25,7 +25,7 @@ const TableRow = ({ imageSrc, tkName, tkSymbl, usernames, tweets, impressionsDat
             </td>
             <td className="px-4 py-0 h-20 overflow-y-auto">
                 <div className="h-8 w-24">
-                    <LineGraph data={impressionsData} color="#10B981" />
+                    <LineGraph data={impressionsData} funtype={"home"} color="#10B981" />
                 </div>
             </td>
             <td className="px-4 py-2 text-xs text-center h-20 overflow-y-auto">

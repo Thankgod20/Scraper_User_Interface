@@ -1,233 +1,164 @@
-import { IDataFeed, CandleData, RawTradeData } from "../types/TradingView";
-let data_: CandleData[];
-let symbol_: any;
-let address_: string;
-export class CustomDataFeed implements IDataFeed {
-  private data: CandleData[];
+// Fixed CustomDataFeed.ts
+import { CandleData, RawTradeData, } from "../types/TradingView";
+import { LibrarySymbolInfo, ResolutionString} from "../../../public/static/charting_library/charting_library"
+import type {
+  SearchSymbolsCallback,
+  SearchSymbolResultItem,
+  ResolveCallback,
+  ErrorCallback,
+  PeriodParams,
+  HistoryCallback,
+  IBasicDataFeed,
+} from "../../../public/static/charting_library/charting_library"
 
-  constructor(rawData: RawTradeData[], symbol: any,address: string) {
+let data_: CandleData[];
+let symbol_: string;
+let address_: string;
+
+interface TradingViewConfig {
+  supported_resolutions: ResolutionString[];
+}
+
+interface SimulationInterval {
+  simulationIntervalId: NodeJS.Timeout;
+  minuteIntervalId: NodeJS.Timeout;
+}
+
+export class CustomDataFeed implements IBasicDataFeed {
+  private data: CandleData[];
+  private subscriptions: Record<string, SimulationInterval> = {};
+  private lastBarTime: number = 0; // Track the last bar time to prevent violations
+
+  constructor(rawData: RawTradeData[], symbol: string, address: string) {
     this.data = rawData.map((entry) => ({
-      time: entry.time * 1000,//new Date(entry.time).getTime(),
+      time: entry.time * 1000,
       open: entry.open,
       high: entry.high,
       low: entry.low,
       close: entry.close,
       volume: (entry.volume),
     }));
+    
+    // Sort data by time and set last bar time
+    this.data.sort((a, b) => a.time - b.time);
+    this.lastBarTime = this.data.length > 0 ? this.data[this.data.length - 1].time : 0;
+    
     data_ = this.data;
-    //console.log("Time Sampt",data_)
     symbol_ = symbol + "/USDT";
-    address_ =address
+    address_ = address;
   }
 
-  onReady(callback: (config: any) => void): void {
+  // Helper method to ensure time consistency
+  private isValidBarTime(newTime: number): boolean {
+    return newTime > this.lastBarTime;
+  }
+
+  // Helper method to update last bar time
+  private updateLastBarTime(time: number): void {
+    if (time > this.lastBarTime) {
+      this.lastBarTime = time;
+    }
+  }
+
+  // Helper method to get next valid timestamp
+  private getNextValidTimestamp(): number {
+    const now = Date.now();
+    const nextMinute = Math.ceil(now / 60000) * 60000; // Round up to next minute
+    return Math.max(nextMinute, this.lastBarTime + 60000);
+  }
+
+  searchSymbols(
+    userInput: string,
+    exchange: string,
+    symbolType: string,
+    onResult: SearchSymbolsCallback
+  ): void {
+    const results: SearchSymbolResultItem[] = [
+      {
+        symbol: symbol_,
+        full_name: symbol_,
+        description: `${symbol_} (${address_.slice(0, 6)}…)`,
+        exchange: 'Custom',
+        ticker: symbol_,
+        type: 'crypto',
+      },
+    ];
+    onResult(results);
+  }
+  
+  onReady(callback: (config: TradingViewConfig) => void): void {
     setTimeout(
       () =>
-        callback({ supported_resolutions: ["1", "5", "15", "30", "60", "D"] }),
+        callback({ 
+          supported_resolutions: ["1", "5", "15", "30", "60", "D"] as ResolutionString[]
+        }),
       0
     );
   }
 
   resolveSymbol(
     symbolName: string,
-    onSymbolResolvedCallback: (symbolInfo: any) => void,
-    onResolveErrorCallback: (error: any) => void
+    onSymbolResolvedCallback: ResolveCallback,
+    onResolveErrorCallback: ErrorCallback,
+    extension?: any
   ): void {
     try {
       setTimeout(() => {
-        onSymbolResolvedCallback({
+        const symbolInfo: LibrarySymbolInfo = {
           name: symbolName,
+          full_name: symbolName,
           description: symbol_ ?? "Custom crypto symbol",
           type: "crypto",
           session: "24x7",
           timezone: "Etc/UTC",
           ticker: symbolName,
           exchange: "CustomExchange",
+          listed_exchange: "CustomExchange",
+          format: "price",
           minmov: 1,
           pricescale: 1000000000,
           has_intraday: true,
-          //intraday_multipliers: ["1", "5", "15", "30", "60"],
           has_weekly_and_monthly: true,
-          supported_resolutions: ["1", "5", "15", "30", "60", "D"],
+          supported_resolutions: ["1", "5", "15", "30", "60", "D"] as ResolutionString[],
           volume_precision: 8,
           visible_plots_set: "ohlcv",
           data_status: "streaming",
-        });
-        console.log();
+        };
+        
+        onSymbolResolvedCallback(symbolInfo);
       }, 1000);
     } catch (error) {
-      onResolveErrorCallback(error);
+      onResolveErrorCallback("Error:"+error);
     }
-
-    console.log("symbolName", {
-      name: symbolName,
-    });
   }
 
   getBars(
-    symbolInfo: any,
-    resolution: string,
-    periodParams: {
-      from: number;
-      to: number;
-      countBack: number;
-      firstDataRequest: boolean;
-    },
-    onHistoryCallback: (bars: CandleData[], meta: { noData: boolean }) => void,
-    onErrorCallback: (error: any) => void
+    symbolInfo: LibrarySymbolInfo,
+    resolution: ResolutionString,
+    periodParams: PeriodParams,
+    onHistoryCallback: HistoryCallback,
+    onErrorCallback: ErrorCallback
   ): void {
-    const { from, to, countBack } = periodParams;
+    const { from, to } = periodParams;
     const bars = data_.filter(
-      (bar) => bar.time >= from  * 1000 && bar.time <= to * 1000
+      (bar) => bar.time >= from * 1000 && bar.time <= to * 1000
     );
-    //console.log("resolution", bars,bars.length); 
-    //1742843517 
-    //1742848740
+
     if (bars.length) {
-      //console.log("bars===", from, to);
       onHistoryCallback(bars, { noData: false });
     } else {
-      //console.log("bars x===", from, to);
       onHistoryCallback([], { noData: true });
     }
   }
-  //1742901900
-  //1742900520
-
- /* subscribeBars(
-    symbolInfo: any,
-    resolution: string,
-    onRealtimeCallback: (bar: CandleData) => void,
-    subscribeUID: string,
-    onResetCacheNeededCallback: () => void
-  ): void {
-    console.log("Subscribed to real-time data", subscribeUID);
   
-    // Wait until data_ is populated
-    const waitForLastBar = (callback: () => void) => {
-      const checkInterval = setInterval(() => {
-        if (data_ && data_.length > 0) {
-          clearInterval(checkInterval);
-          callback();
-        }
-      }, 100); // Check every 100 milliseconds
-    };
-  
-    waitForLastBar(() => {
-      // Initialize lastBar and base values
-      let lastBar = data_[data_.length - 1];
-      let basePrice = lastBar.close;
-      let baseVolume = lastBar.volume;
-      let t = 0; // time counter for oscillation
-  
-      // Define oscillation amplitudes
-      const priceAmplitude = Math.abs(lastBar.close - lastBar.open);
-      const volumeAmplitude = lastBar.volume * 0.1;
-  
-      // Start live candle animation every second using oscillatory movement
-      const intervalId = setInterval(() => {
-        t++; // Increment our time counter (in seconds)
-        const oscillation = Math.sin(t); // Oscillates between -1 and 1
-  
-        // Calculate oscillated values based on base values
-        const newClose = +(basePrice + oscillation * priceAmplitude).toFixed(6);
-        const newHigh = +(basePrice + Math.abs(oscillation) * priceAmplitude).toFixed(6);
-        const newLow = +(basePrice - Math.abs(oscillation) * priceAmplitude).toFixed(6);
-        const newVolume = +(baseVolume + oscillation * volumeAmplitude).toFixed(2);
-  
-        // Build the updated bar (time and open remain constant)
-        const updatedBar: CandleData = {
-          time: lastBar.time, // keep same candle timestamp during its duration
-          open: lastBar.open,
-          high: newHigh,
-          low: newLow,
-          close: newClose,
-          volume: newVolume,
-        };
-  
-        lastBar = updatedBar;
-        onRealtimeCallback(updatedBar);
-      }, 1000); // update every second
-   // Calculate delay for the next full minute based on lastBar.time
- 
-      // Fetch real candle every minute from /api/raydium and reset base values
-      const minuteIntervalId = setInterval(() => {
-        console.log("Fetching latest bar from Raydium API...");
-        
-        fetch('/api/live', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ address: address_ }),
-        })
-          .then((response) => response.json())
-          .then((result) => {
-            const ohlcvList = result.data.attributes.ohlcv_list;
-            if (ohlcvList && ohlcvList.length > 0) {
-              const latest = ohlcvList[ohlcvList.length - 1];
-              const newBar: CandleData = {
-                time: latest[0] * 1000,
-                open: latest[1],
-                high: latest[2],
-                low: latest[3],
-                close: latest[4],
-                volume: latest[5],
-              };
-  
-              console.log("New bar fetched:", newBar);
-              console.warn(
-                "Fetched new bar is not newer than last bar. Ignoring it.",
-                "lastBar.time:", lastBar.time,
-                "newBar.time:", newBar.time
-              );
-              // Push new bar, then sort and remove duplicates by timestamp.
-              data_.push(newBar);
-              data_.sort((a, b) => a.time - b.time);
-              data_ = data_.reduce((acc: CandleData[], cur) => {
-                if (acc.length === 0 || acc[acc.length - 1].time !== cur.time) {
-                  acc.push(cur);
-                }
-                return acc;
-              }, []);
-  
-              // Update lastBar from the cleaned data
-              lastBar = data_[data_.length - 1];
-  
-              // Reset our base values and oscillation counter for the new candle
-              basePrice = lastBar.close;
-              baseVolume = lastBar.volume;
-              t = 0;
-              console.warn(
-                "Fetched new bar is not newer than last bar. Ignoring it.",
-                "lastBar.time:", lastBar.time,
-                "newBar.time:", newBar.time
-              );
-              
-              // Push the new bar to the chart
-              onRealtimeCallback(lastBar);
-            }
-          })
-          .catch((error) => {
-            console.error("Error fetching Raydium bar:", error);
-          });
-      }, 50*1000); // every 1 minute
-  
-      // Store intervals for cleanup
-      (this as any)[subscribeUID] = { intervalId, minuteIntervalId };
-    });
-  }
-  */
   subscribeBars(
-    symbolInfo: any,
-    resolution: string,
+    symbolInfo: LibrarySymbolInfo,
+    resolution: ResolutionString,
     onRealtimeCallback: (bar: CandleData) => void,
-    subscribeUID: string,
-    onResetCacheNeededCallback: () => void
+    subscribeUID: string
   ): void {
     console.log("Subscribed to real-time data", subscribeUID);
   
-    // Wait until data_ is populated
     const waitForLastBar = (callback: () => void) => {
       const checkInterval = setInterval(() => {
         if (data_ && data_.length > 0) {
@@ -238,42 +169,40 @@ export class CustomDataFeed implements IDataFeed {
     };
   
     waitForLastBar(() => {
-      // Get the last completed bar from history
       let completedBar = data_[data_.length - 1];
-  
-      // Create a new simulated candle for the next interval
+      
+      // Ensure we have a valid next timestamp
+      const nextValidTime = this.getNextValidTimestamp();
+      
       let simulatedBar: CandleData = {
-        time: completedBar.time + 60000, // next minute timestamp
-        open: completedBar.close,          // new candle opens at the last bar's close
+        time: nextValidTime,
+        open: completedBar.close,
         high: completedBar.close,
         low: completedBar.close,
         close: completedBar.close,
-        volume: 0,                         // start at 0 volume (or adjust as needed)
+        volume: 0,
       };
-  
-      // Set simulation base values from the new simulated candle
+
+      // Update our tracking
+      this.updateLastBarTime(simulatedBar.time);
+
       let basePrice = simulatedBar.open;
       let baseVolume = simulatedBar.volume;
-      let t = 0; // simulation time counter (seconds)
-  
-      // Use the amplitude of the previous candle as a rough estimate
+      let t = 0;
+
       const priceAmplitude = Math.abs(completedBar.close - completedBar.open);
-      const volumeAmplitude = completedBar.volume * 0.1; // adjust as needed
-  
-      // Function to start simulation (updates every second) for the new candle
-      let simulationIntervalId: any;
+      const volumeAmplitude = completedBar.volume * 0.1;
+
       const startSimulation = () => {
-        simulationIntervalId = setInterval(() => {
-          t++; // increment simulation counter
-          const osc = Math.sin(t); // oscillates between -1 and 1
-  
-          // Calculate new simulated values
+        return setInterval(() => {
+          t++;
+          const osc = Math.sin(t);
+
           const newClose = +(basePrice + osc * priceAmplitude).toFixed(6);
           const newHigh = Math.max(simulatedBar.high, newClose);
           const newLow = Math.min(simulatedBar.low, newClose);
-          // For volume, you might simulate accumulating volume (or oscillatory)
           const newVolume = +(baseVolume + osc * volumeAmplitude).toFixed(2);
-  
+
           simulatedBar = {
             ...simulatedBar,
             close: newClose,
@@ -281,18 +210,14 @@ export class CustomDataFeed implements IDataFeed {
             low: newLow,
             volume: newVolume,
           };
-  
+
           onRealtimeCallback(simulatedBar);
         }, 1000);
       };
-  
-      // Start the simulation for the new candle
-      startSimulation();
-  
-      // Minute update: fetch two bars from the API every minute
+
+      let simulationIntervalId = startSimulation();
+
       const minuteIntervalId = setInterval(() => {
-        //console.log("Fetching latest bars from API...");
-  
         fetch('/api/live', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -302,12 +227,12 @@ export class CustomDataFeed implements IDataFeed {
           .then((result) => {
             const ohlcvList = result.data.attributes.ohlcv_list;
             if (ohlcvList && ohlcvList.length >= 2) {
-              // Sort the fetched list by timestamp (index 0)
+              // Sort by timestamp
               ohlcvList.sort((a: number[], b: number[]) => a[0] - b[0]);
-              // Extract the last two bars:
+              
               const prevData = ohlcvList[ohlcvList.length - 2];
               const currData = ohlcvList[ohlcvList.length - 1];
-  
+
               const replacedBar: CandleData = {
                 time: prevData[0] * 1000,
                 open: prevData[1],
@@ -316,7 +241,7 @@ export class CustomDataFeed implements IDataFeed {
                 close: prevData[4],
                 volume: prevData[5],
               };
-  
+
               const fetchedNewBar: CandleData = {
                 time: currData[0] * 1000,
                 open: currData[1],
@@ -325,20 +250,47 @@ export class CustomDataFeed implements IDataFeed {
                 close: currData[4],
                 volume: currData[5],
               };
-  
-              //console.log("Fetched replaced bar:", replacedBar);
-              //console.log("Fetched new bar:", fetchedNewBar);
-  
-              // Clear the simulation for the current new candle so it can be replaced
+
+              // CRITICAL FIX: Only add bars if they have valid timestamps
+              const currentTime = Date.now();
+              
+              // Filter out bars that are too old or have invalid timestamps
+              const validBars: CandleData[] = [];
+              
+              if (this.isValidBarTime(replacedBar.time) && replacedBar.time <= currentTime) {
+                validBars.push(replacedBar);
+              }
+              
+              if (this.isValidBarTime(fetchedNewBar.time) && fetchedNewBar.time <= currentTime) {
+                validBars.push(fetchedNewBar);
+              }
+
+              if (validBars.length === 0) {
+                console.warn("No valid bars to add - timestamps are invalid");
+                return;
+              }
+
+              // Clear simulation
               clearInterval(simulationIntervalId);
-  
-              // Push the fetched replaced bar to override the simulated value
-              onRealtimeCallback(replacedBar);
-              // Then push the fetched new bar as the latest candle
-              onRealtimeCallback(fetchedNewBar);
-  
-              // Update the internal data array
-              data_.push(replacedBar, fetchedNewBar);
+
+              // Add valid bars in order
+              validBars.forEach(bar => {
+                console.log(`Adding bar with time: ${new Date(bar.time).toISOString()}`);
+                onRealtimeCallback(bar);
+                this.updateLastBarTime(bar.time);
+              });
+
+              // Update internal data
+              validBars.forEach(bar => {
+                const existingIndex = data_.findIndex(d => d.time === bar.time);
+                if (existingIndex >= 0) {
+                  data_[existingIndex] = bar; // Update existing
+                } else {
+                  data_.push(bar); // Add new
+                }
+              });
+
+              // Sort and deduplicate
               data_ = data_
                 .sort((a, b) => a.time - b.time)
                 .reduce((acc: CandleData[], cur) => {
@@ -347,47 +299,48 @@ export class CustomDataFeed implements IDataFeed {
                   }
                   return acc;
                 }, []);
-  
-              // Set the new simulated candle for the next interval:
+
+              // Set up next simulation bar
+              const latestBar = validBars[validBars.length - 1];
+              const nextSimTime = this.getNextValidTimestamp();
+              
               simulatedBar = {
-                time: fetchedNewBar.time + 60000,
-                open: fetchedNewBar.close,
-                high: fetchedNewBar.close,
-                low: fetchedNewBar.close,
-                close: fetchedNewBar.close,
+                time: nextSimTime,
+                open: latestBar.close,
+                high: latestBar.close,
+                low: latestBar.close,
+                close: latestBar.close,
                 volume: 0,
               };
-  
-              // Update simulation base values
+
+              this.updateLastBarTime(simulatedBar.time);
               basePrice = simulatedBar.open;
               baseVolume = simulatedBar.volume;
               t = 0;
-  
-              // Update lastBar (for logging or further reference) as fetchedNewBar
-              completedBar = fetchedNewBar;
-  
-              // Restart simulation for the new candle
-              startSimulation();
+              completedBar = latestBar;
+
+              simulationIntervalId = startSimulation();
             }
           })
           .catch((error) => {
             console.error("Error fetching new bars:", error);
           });
-      }, 60000); // every 1 minute
-  
-      // Store intervals for cleanup
-      (this as any)[subscribeUID] = { simulationIntervalId, minuteIntervalId };
+      }, 60000);
+
+      this.subscriptions[subscribeUID] = { 
+        simulationIntervalId, 
+        minuteIntervalId 
+      };
     });
   }
   
-  
-
   unsubscribeBars(subscribeUID: string): void {
     console.log("Unsubscribed from real-time data", subscribeUID);
-    const intervalId = (this as any)[subscribeUID];
-    if (intervalId) {
-      clearInterval(intervalId);
-      delete (this as any)[subscribeUID];
+    const intervals = this.subscriptions[subscribeUID];
+    if (intervals) {
+      clearInterval(intervals.simulationIntervalId);
+      clearInterval(intervals.minuteIntervalId);
+      delete this.subscriptions[subscribeUID];
     }
   }
 }
