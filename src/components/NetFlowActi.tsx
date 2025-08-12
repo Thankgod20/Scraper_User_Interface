@@ -192,7 +192,7 @@ export default function ActiveWallets({
   const throttleRef = useRef(false);
   const [isLoaded, setIsLoaded] = useState(true);
   const [isEnd, setIsEnd] = useState(false);
-
+  const [isPaused, setIsPaused] = useState(false);
   // Process data (this can be done conditionally since it's not a hook)
   const processedData = React.useMemo(() => {
     if (!chartdata || !chartdata.timestamps || chartdata.timestamps.length === 0) {
@@ -372,7 +372,7 @@ export default function ActiveWallets({
     // Handle zoom/pan events
     if (onZoomOrPan) {
       chart.timeScale().subscribeVisibleTimeRangeChange(async (timeRange) => {
-        if (!timeRange || isEnd || !isLoaded || throttleRef.current) return;
+        if (!timeRange || isEnd || !isLoaded || throttleRef.current || isPaused) return;
 
         const fromTime = timeRange.from as number;
         const toTime = timeRange.to as number;
@@ -413,8 +413,9 @@ export default function ActiveWallets({
     }
 
     // Fit content
-    chart.timeScale().fitContent();
-
+    if (!isPaused){
+      chart.timeScale().fitContent();
+    }
     // Handle resize
     const handleResize = () => {
       if (chartContainerRef.current && chartRef.current) {
@@ -486,6 +487,21 @@ export default function ActiveWallets({
           <div className="w-3 h-2 bg-purple-500"></div>
           <span>Total Active</span>
         </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+          <input
+              type="checkbox"
+              checked={isPaused}
+              onChange={(e) => setIsPaused(e.target.checked)}
+          />
+          <span style={{ 
+              width: '16px', 
+              height: '12px', 
+              backgroundColor: isPaused ? '#EF4444' : '#10B981', 
+              display: 'inline-block',
+              marginRight: '4px'
+          }}></span>
+          Pause Data Fetching
+      </label>
       </div>
 
       {/* Chart container */}

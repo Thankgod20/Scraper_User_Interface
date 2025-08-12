@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { useMetadata } from '@/context/MetadataContext';
 import Script from 'next/script';
-import { CandlestickChart as CandlestickChartIcon, ListOrdered, MessagesSquare, LineChart as LineChartIcon,BarChartBig,Star } from 'lucide-react';
+import { CandlestickChart as CandlestickChartIcon, ListOrdered, MessagesSquare, LineChart as LineChartIcon,BarChartBig,Star,BookOpen } from 'lucide-react';
 import Watchlist from '@/components/Watchlist'
 
 // Components
@@ -16,7 +16,7 @@ import MobileNav from '@/components/MobileNav'; // Import MobileNav
 
 // Types (assuming these are correctly defined elsewhere)
 import { RawTradeData } from '@/app/types/TradingView';
-import {  CategoryHoldings, MACDPoint, TimeSeriess, Impression, CompImpression } from '@/app/utils/app_types';
+import {  CategoryHoldings, MACDPoint, TimeSeriess, Impression, CompImpression,TieredAccountCount,TieredImpression,DetailedVImpression ,AINarrativeResponse,TieredInfluence} from '@/app/utils/app_types';
 type ZoomReport = {
   totalpage: number;
   currentpage: number;
@@ -52,6 +52,8 @@ export default function Home() {
   const [likes, setLikes] = useState<string[]>([]);
   const [viewscount, setViewCount] = useState<string[]>([]);
   const [time, setTime] = useState<string[]>([]);
+  const [loadAll, setLoadAll] =  useState("");
+  const [aiNarrative, setAINarrative]=useState<AINarrativeResponse | null>(null);
   const [profile, setProfile] = useState<string[]>([]);
   const [plotNetFlow, setPlotNetFlow] = useState<ChartData>({
     timestamps: [], prices: { timestamps: [], values: [] },
@@ -64,18 +66,19 @@ export default function Home() {
   const [livePrice, setLivePrice] = useState<RawTradeData[]>([]);
   const [totalchartData, setTotalChartData] = useState<RawTradeData[]>([]);
   const [poolID, setPoolID] = useState<string>()
-
+  const [isMetricsMaximized, setIsMetricsMaximized] = useState(false);
+  const [activeRightTab, setActiveRightTab] = useState('orderbook'); // 'orderbook' or 'metrics'
   // State for component data (simplified for brevity, keep your existing state structure)
   const [frequency, setFrequency] = useState<{ tweetFrequencyTrend: Impression[]; tweetsWithAddressFrequency: Impression[]; }>({ tweetFrequencyTrend: [], tweetsWithAddressFrequency: [] });
   const [tweets, setTweets] = useState<{ tweetPerMinut: Impression[]; tweetPerFVmints: Impression[]; tweetsWithAddressCount: Impression[]; }>({ tweetPerMinut: [], tweetPerFVmints: [], tweetsWithAddressCount: [] });
-  const [values, setValues] = useState<{ totalTweets: string; averagePercentage: number; averagePercentageFv: number; }>({ totalTweets: '', averagePercentage: 0, averagePercentageFv: 0 });
-  const [sei, setSEI] = useState<{ SEI_value: Impression[]; SEI_Velocity: Impression[]; }>({ SEI_value: [], SEI_Velocity: [] });
+  const [values, setValues] = useState<{ totalTweets: string; averagePercentage: number; averagePercentageFv: number;numbottweet:number }>({ totalTweets: '', averagePercentage: 0, averagePercentageFv: 0,numbottweet:0 });
+  const [sei, setSEI] = useState<{ SEI_value: Impression[]; SEI_Velocity: Impression[];SEI_EMA: Impression[]; }>({ SEI_value: [], SEI_Velocity: [] ,SEI_EMA:[]});
   const [fomo, setFomo] = useState<{ tweetFomo: Impression[]; macd: MACDPoint[]; RSIx: Impression[]; }>({ tweetFomo: [], macd: [], RSIx: [] });
-  const [tweetImpression, setTweetImpression] = useState<{ weighBasedImpression: Impression[]; sentimentTrend: TimeSeriess[]; EWMA_Value: Impression[]; }>({ weighBasedImpression: [], sentimentTrend: [], EWMA_Value: [] });
+  const [tweetImpression, setTweetImpression] = useState<{ weighBasedImpression: Impression[]; sentimentTrend: Impression[]; EWMA_Value: Impression[]; tiredImpression: TieredInfluence[];tieredAccountCount: TieredAccountCount[];tweetvelocityImpressions: DetailedVImpression[] }>({ weighBasedImpression: [], sentimentTrend: [], EWMA_Value: [],tiredImpression:[], tieredAccountCount:[],tweetvelocityImpressions:[]});
   const [views, setViews] = useState<{ tweetViewsPerFVmints: CompImpression[]; tweetsWithAddressViews: CompImpression[]; tweetViewsRatioPercentage: Impression[]; }>({ tweetViewsPerFVmints: [], tweetsWithAddressViews: [], tweetViewsRatioPercentage: [] });
   const [viewsAlt, setViewsAlt] = useState<{ avgViewsPerTweet: number; tweetwithAddAvgViews: number; }>({ avgViewsPerTweet: 0, tweetwithAddAvgViews: 0 });
   const [hypeMeter, setHypeMeter] = useState<{ sentiMeter: number; sentiMeterAddr: number; }>({ sentiMeter: 0, sentiMeterAddr: 0 });
-
+  
   const [isScriptReady, setIsScriptReady] = useState(false);
   const [isScriptWidgetReady, setIsScriptWidgetReady] = useState(false);
   
@@ -129,12 +132,15 @@ export default function Home() {
     };
     fetchInitialMetadata();
   }, [metadata, address]);
-
+/*
   useEffect(() => {
     const fetchFullMetadata = async () => {
       if (!manualMetadata?.uri) return;
       try {
-        const response = await fetch(manualMetadata.uri);
+        console.log("manualMetadata",manualMetadata.uri)
+        //const response = await fetch(manualMetadata.uri);
+        //const data = await response.json();
+        const response = await fetch(`/api/proxy?url=${encodeURIComponent(manualMetadata.uri)}`);
         const data = await response.json();
         setAllMetadata(data);
       } catch (error) {
@@ -143,7 +149,68 @@ export default function Home() {
     };
     fetchFullMetadata();
   }, [manualMetadata]);
+*/
+useEffect(() => {
+  const fetchFullMetadata = async () => {
+    if (!manualMetadata?.uri) return;
 
+    try {
+      console.log("manualMetadata", manualMetadata.uri);
+      const response = await fetch(`/api/proxy?url=${encodeURIComponent(manualMetadata.uri)}`);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch metadata: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      setAllMetadata(data);
+    } catch (error) {
+      console.error('Error fetching full token metadata, falling back to manualMetadata:', error);
+
+      setAllMetadata({
+        name: manualMetadata.name,
+        symbol: manualMetadata.symbol,
+        description: "",
+        image: "",
+        showName: true,
+        createdOn: "",
+        twitter: "",
+        telegram: "",
+        website: "",
+      });
+    }
+  };
+
+  fetchFullMetadata();
+}, [manualMetadata]);
+
+
+// Updated useEffect in your component
+/*
+useEffect(() => {
+  const fetchFullMetadata = async () => {
+    if (!manualMetadata?.uri) return;
+    
+    try {
+      console.log("manualMetadata", manualMetadata.uri);
+      
+      // Use the generic proxy with the full URL as a parameter
+      const proxyUrl = `/api/proxy?url=${encodeURIComponent(manualMetadata.uri)}`;
+      const response = await fetch(proxyUrl);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setAllMetadata(data);
+    } catch (error) {
+      console.error('Error fetching full token metadata:', error);
+    }
+  };
+
+  fetchFullMetadata();
+}, [manualMetadata]);*/
   useEffect(() => {
     const fetchRaydiumAndLiveData = async () => {
       try {
@@ -153,6 +220,7 @@ export default function Home() {
         });
         const raydiumResult = await raydiumResponse.json();
         const poolId = raydiumResult.poolId;
+        console.log("PoolIDS",poolId)
         setPoolID(poolId);
         const ohlcvList = raydiumResult.ohlcv?.data?.attributes?.ohlcv_list || [];
         const initialMappedData: RawTradeData[] = ohlcvList.map((entry: number[]) => ({
@@ -212,7 +280,7 @@ export default function Home() {
   const fetchDataAndSentiment = useCallback(async () => {
     if (!address || !poolID || !allMetadata?.symbol) return;
     try {
-      const res = await fetch(`/api/sentiment?address=${address}&symbol=${allMetadata.symbol}&page=1&limit=20`);
+      const res = await fetch(`/api/sentiment?address=${address}&symbol=${allMetadata.symbol}&page=1&limit=20${loadAll}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to fetch sentiment data');
 
@@ -267,6 +335,7 @@ export default function Home() {
       setSEI(prev => ({
         SEI_value: appendUnique(prev.SEI_value, data.SEI.SEI_value, 'name'),
         SEI_Velocity: appendUnique(prev.SEI_Velocity, data.SEI.SEI_Velocity, 'name'),
+        SEI_EMA: appendUnique(prev.SEI_EMA, data.SEI.SEI_EMA, 'name'), // Assuming SEI_EMA is also in SEI
       }));
       setFomo(prev => ({
         tweetFomo: appendUnique(prev.tweetFomo, data.Fomo.tweetFomo, 'name'),
@@ -275,8 +344,11 @@ export default function Home() {
       }));
       setTweetImpression(prev => ({
         weighBasedImpression: appendUnique(prev.weighBasedImpression, data.impression.weighBasedImpression, 'name'),
-        sentimentTrend: appendUnique(prev.sentimentTrend, data.impression.sentimentTrend, 'time'),
+        sentimentTrend: appendUnique(prev.sentimentTrend, data.impression.sentimentTrend, 'name'),
         EWMA_Value: appendUnique(prev.EWMA_Value, data.impression.EWMA_Value, 'name'),
+        tiredImpression: appendUnique(prev.tiredImpression, data.impression.tiredImpression, 'name'),
+        tieredAccountCount: appendUnique(prev.tieredAccountCount, data.impression.tieredAccountCount, 'name'),
+        tweetvelocityImpressions: appendUnique(prev.tweetvelocityImpressions, data.impression.tweetvelocityImpressions, 'name'),
       }));
       setViews(prev => ({
         tweetViewsPerFVmints: appendUnique(prev.tweetViewsPerFVmints, data.views.tweetViewsPerFVmints, 'name'),
@@ -286,11 +358,11 @@ export default function Home() {
       setViewsAlt(data.views); // Assuming avgViewsPerTweet, tweetwithAddAvgViews are directly in views
       setHypeMeter(data.hype);
       setEmojiRawData(prev => appendUniqueByTime(prev, data.emojiArray));
-
+      setAINarrative(data.aiAnalysis)
     } catch (err) {
       console.error('Error fetching aggregated data:', err);
     }
-  }, [address, poolID, allMetadata?.symbol]);
+  }, [address, poolID, loadAll,allMetadata?.symbol]);
 
   const fetchHoldersDataAndSRS = useCallback(async () => {
     if (!address || !poolID) return;
@@ -460,7 +532,9 @@ export default function Home() {
     } else if (['ct', 'ds', 'srs', 'netflow'].includes(funtype)) {
         url = `http://${hostname}:3300/api/${funtype === 'netflow' ? 'flow-analytics' : 'holder_srs'}?address=${address}&lps=${poolID}&page=${page}&limit=50`;
     } else { // Sentiment related data
-        url = `/api/sentiment?address=${address}&symbol=${allMetadata?.symbol}&page=${page}&limit=20`;
+
+        url = `/api/sentiment?address=${address}&symbol=${allMetadata?.symbol}&page=${page}&limit=20${loadAll}`;
+        console.log("URL for sentiment data:", url);
     }
 
     try {
@@ -591,9 +665,9 @@ export default function Home() {
           }));
         setValues(data.tweetperMinutes);
       }
-      else if (funtype === 'vlcrt') setSEI(prev => ({ SEI_value: appendUnique(prev.SEI_value, data.SEI.SEI_value, 'name'), SEI_Velocity: appendUnique(prev.SEI_Velocity, data.SEI.SEI_Velocity, 'name') }));
+      else if (funtype === 'vlcrt') setSEI(prev => ({ SEI_value: appendUnique(prev.SEI_value, data.SEI.SEI_value, 'name'), SEI_Velocity: appendUnique(prev.SEI_Velocity, data.SEI.SEI_Velocity, 'name'), SEI_EMA: appendUnique(prev.SEI_EMA, data.SEI.SEI_EMA, 'name') }));
       else if (funtype === 'fmgwt') setFomo(prev => ({ tweetFomo: appendUnique(prev.tweetFomo, data.Fomo.tweetFomo, 'name'), macd: appendUnique(prev.macd, data.Fomo.macd, 'name'), RSIx: appendUnique(prev.RSIx, data.Fomo.RSI, 'name') }));
-      else if (funtype === 'impgrw') setTweetImpression(prev => ({ weighBasedImpression: appendUnique(prev.weighBasedImpression, data.impression.weighBasedImpression, 'name'), sentimentTrend: appendUnique(prev.sentimentTrend, data.impression.sentimentTrend, 'time'), EWMA_Value: appendUnique(prev.EWMA_Value, data.impression.EWMA_Value, 'name') }));
+      else if (funtype === 'impgrw') setTweetImpression(prev => ({ weighBasedImpression: appendUnique(prev.weighBasedImpression, data.impression.weighBasedImpression, 'name'), sentimentTrend: appendUnique(prev.sentimentTrend, data.impression.sentimentTrend, 'name'), EWMA_Value: appendUnique(prev.EWMA_Value, data.impression.EWMA_Value, 'name'),tiredImpression: appendUnique(prev.tiredImpression, data.impression.tiredImpression, 'name'), tieredAccountCount: appendUnique(prev.tieredAccountCount, data.impression.tieredAccountCount, 'name'),tweetvelocityImpressions: appendUnique(prev.tweetvelocityImpressions, data.impression.tweetvelocityImpressions, 'name') }));
       else if (funtype === 'avtwavvw') {
         setViews(prev => ({
             tweetViewsPerFVmints: appendUnique(prev.tweetViewsPerFVmints, data.views.tweetViewsPerFVmints, 'name'),
@@ -609,7 +683,7 @@ export default function Home() {
       console.error(`Error fetching more data for ${funtype}:`, err);
       return { totalpage: 0, currentpage: 0 };
     }
-  }, [address, poolID, allMetadata?.symbol]);
+  }, [address, poolID,loadAll, allMetadata?.symbol]);
 
 
   const mobileNavItems = [
@@ -658,7 +732,67 @@ export default function Home() {
               </p>
             </div>
           </div>
-          
+          {/* Checkbox */}
+          <label className="flex items-center space-x-1 text-sm text-gray-300">
+          <input
+            type="checkbox"
+            checked={loadAll === "&alldata=true"}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setLoadAll(checked ? "&alldata=true" : "");
+              
+              // Reset all states
+              setEmojiRawData([]);
+              //setHoldersRawData([]);
+              //setHoldersData([]);
+              //setHolderHistoryData([]);
+              setUsernames([]);
+              setUTweets([]);
+              setLikes([]);
+              setViewCount([]);
+              setTime([]);
+              setProfile([]);
+             /* setPlotNetFlow({
+                timestamps: [],
+                prices: { timestamps: [], values: [] },
+                inflow: { whale: [], retail: [], shark: [] },
+                outflow: { whale: [], retail: [], shark: [] },
+                netflow: { whale: [], retail: [], shark: [] },
+                activeHolders: { whale: [], retail: [], shark: [], total: [] },
+              });*/
+              //setPlotDistribution(undefined);
+              //setPlotHoldingCount(undefined);
+              //setChartData([]);
+              //setLivePrice([]);
+              //setTotalChartData([]);
+              //setPoolID(undefined);
+              //setIsMetricsMaximized(false);
+              //setActiveRightTab('orderbook');
+              setFrequency({ tweetFrequencyTrend: [], tweetsWithAddressFrequency: [] });
+              setTweets({ tweetPerMinut: [], tweetPerFVmints: [], tweetsWithAddressCount: [] });
+              setValues({ totalTweets: '', averagePercentage: 0, averagePercentageFv: 0,numbottweet:0 });
+              setSEI({ SEI_value: [], SEI_Velocity: [] , SEI_EMA: [] });
+              setFomo({ tweetFomo: [], macd: [], RSIx: [] });
+              setTweetImpression({
+                weighBasedImpression: [],
+                sentimentTrend: [],
+                EWMA_Value: [],
+                tiredImpression: [],
+                tieredAccountCount: [],
+                tweetvelocityImpressions: [],
+              });
+              setViews({
+                tweetViewsPerFVmints: [],
+                tweetsWithAddressViews: [],
+                tweetViewsRatioPercentage: [],
+              });
+              setViewsAlt({ avgViewsPerTweet: 0, tweetwithAddAvgViews: 0 });
+              setHypeMeter({ sentiMeter: 0, sentiMeterAddr: 0 });
+            }}
+            className="w-4 h-4 text-blue-500 bg-gray-800 border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
+          />
+            <span>Load all</span>
+          </label>
           {/* Using lastPriceData from useMemo */}
           {lastPrice !== undefined && (
             <div className="flex items-center space-x-2 bg-gray-800/70 rounded-md px-3 py-1.5">
@@ -672,20 +806,13 @@ export default function Home() {
   
       <main className="flex-grow flex flex-col md:flex-row overflow-hidden p-2 md:p-3 gap-2 md:gap-3">
         {/* Desktop Layout: 3 Columns */}
-        {/* 
-          IMPORTANT: The `h-[calc(100vh-68px-1.5rem)]` on this div will try to fit everything within the viewport.
-          If the content in the left or center columns is too tall, it will overflow or be cut off
-          unless the individual panels have their own `overflow-y-auto` and defined heights.
-          The previous `h-[200vh]` was likely for testing scroll, but for a fixed layout, viewport height is more common.
-          Let's revert to a viewport-based height and ensure inner panels manage their scroll.
-        */}
-        <div className="hidden md:flex flex-grow gap-3 h-[150vh]"> {/* Header height ~68px, padding ~1.5rem */}
+        <div className="hidden md:flex flex-grow gap-3 h-[150vh]">
           
-          {/* Left Panel (Chart, Social Feed, Key Metrics) */}
-          <section className="w-[calc(65%-0.375rem)] flex flex-col gap-3"> {/* 65% minus half gap */}
+          {/* Left Panel (Chart, Social Feed) */}
+          <section className="w-[calc(65%-0.375rem)] flex flex-col gap-3">
             
-            {/* Chart Container - Aim for ~50% of the left panel's height */}
-            <div className="h-[80%] bg-gray-800/40 backdrop-blur-sm rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden flex flex-col">
+            {/* Chart Container */}
+            <div className="h-[60%] bg-gray-800/40 backdrop-blur-sm rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden flex flex-col">
               <div className="flex items-center justify-between p-3 border-b border-gray-700/50 bg-gray-800/60 rounded-t-xl flex-shrink-0">
                 <h2 className="text-base font-semibold text-gray-200">Price Chart</h2>
                  <div className="flex items-center space-x-2">
@@ -693,7 +820,7 @@ export default function Home() {
                    <span className="text-xs text-gray-400">{livePrice.length > 0 ? 'Live Data' : 'Connecting...'}</span>
                  </div>
               </div>
-              <div className="p-0.5 flex-grow overflow-hidden"> {/* Chart itself takes remaining space */}
+              <div className="p-0.5 flex-grow overflow-hidden">
                 {isScriptReady && isScriptWidgetReady && totalchartData.length > 0 ? (
                   <TVChartContainer data={totalchartData} name={metadata_?.name} address={address} symbol={metadata_?.symbol} emojiData={emojiRawData} />
                 ) : (
@@ -707,8 +834,8 @@ export default function Home() {
               </div>
             </div>
             
-            {/* Social Feed - Aim for ~25% of the left panel's height */}
-            <div className="h-[25%] bg-gray-800/40 backdrop-blur-sm rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden flex flex-col">
+            {/* Social Feed */}
+            <div className="h-[40%] bg-gray-800/40 backdrop-blur-sm rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden flex flex-col">
               <div className="flex items-center justify-between p-3 border-b border-gray-700/50 bg-gray-800/60 rounded-t-xl flex-shrink-0">
                 <h2 className="text-base font-semibold text-gray-200">Social Feed</h2>
                  <div className="flex items-center space-x-2">
@@ -720,43 +847,70 @@ export default function Home() {
                 <TopTweets username={usernames} tweets_={utweets} likes={likes} viewscount={viewscount} timestamp={time} profile={profile} />
               </div>
             </div>
-
-            {/* Key Metrics - Aim for ~25% of the left panel's height */}
-            <div className="h-[25%] bg-gray-800/40 backdrop-blur-sm rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden flex flex-col">
-              <div className="flex items-center justify-between p-3 border-b border-gray-700/50 bg-gray-800/60 rounded-t-xl flex-shrink-0">
-                <h2 className="text-base font-semibold text-gray-200">Key Metrics</h2>
-                <div className="flex items-center space-x-2">
-                   <BarChartBig size={16} className="text-yellow-400" />
-                   <span className="text-xs text-gray-400">Analytics</span>
-                 </div>
-              </div>
-              <div className="p-3 flex-grow overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800/50">
-                <MetricsGrid 
-                  address={address} name={metadata_?.image} twitter={metadata_?.twitter} Frequency={frequency} 
-                  Tweets={tweets} Values={values} SEI={sei} FOMO={fomo} TweetImpression={tweetImpression} 
-                  Views={views} ViewsAlt={viewsAlt} HypeMeter={hypeMeter}
-                  holders={holderRawData} live_prx={livePrice}
-                  fetchOlderHoldingCount={fetchMoreDataForChild}
-                />
-              </div>
-            </div>
           </section>
   
-          {/* Center Panel (Order Book ONLY) - Full height of its column */}
-          <aside className="w-[calc(35%-0.375rem)] flex flex-col gap-3"> {/* 35% minus half gap */}
-            {/* OrderBookPanel takes the full height of this aside column */}
-            <div className="flex-1 bg-transparent p-0 rounded-xl overflow-hidden min-h-0">
-              <OrderBookPanel 
-                holders={holderRawData} live_prx={livePrice} holderplot={holderData} holderhistroy={holderHistoryData}
-                plotBuyData={plotNetFlow} 
-                plotDistribution={plotDistribution!} // Ensure plotDistribution is defined
-                plotHoldingCount={plotHoldigCount!} // Ensure plotHoldingCount is defined
-                fetchOlderHoldingCount={fetchMoreDataForChild}
-              />
+          {/* Center Panel (Tabbed: Order Book / Metrics) */}
+          <aside className="w-[calc(35%-0.375rem)] flex flex-col gap-3">
+            {/* Tab Container with full height */}
+            <div className="flex-1 bg-gray-800/40 backdrop-blur-sm rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden flex flex-col min-h-0">
+              {/* Tab Headers */}
+              <div className="flex border-b border-gray-700/50 bg-gray-800/60 rounded-t-xl flex-shrink-0">
+                <button
+                  onClick={() => setActiveRightTab('orderbook')}
+                  className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
+                    activeRightTab === 'orderbook'
+                      ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-700/30'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/20'
+                  }`}
+                >
+                  <div className="flex items-center justify-center space-x-2">
+                    <BookOpen size={16} />
+                    <span>Order Book</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => setActiveRightTab('metrics')}
+                  className={`flex-1 px-4 py-3 text-sm font-medium transition-colors ${
+                    activeRightTab === 'metrics'
+                      ? 'text-yellow-400 border-b-2 border-yellow-400 bg-gray-700/30'
+                      : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/20'
+                  }`}
+                >
+                  <div className="flex items-center justify-center space-x-2">
+                    <BarChartBig size={16} />
+                    <span>Metrics</span>
+                  </div>
+                </button>
+              </div>
+              
+              {/* Tab Content */}
+              <div className="flex-1 overflow-hidden">
+                {activeRightTab === 'orderbook' ? (
+                  <div className="h-full">
+                    <OrderBookPanel 
+                      holders={holderRawData} live_prx={livePrice} holderplot={holderData} holderhistroy={holderHistoryData}
+                      plotBuyData={plotNetFlow} 
+                      plotDistribution={plotDistribution!}
+                      plotHoldingCount={plotHoldigCount!}
+                      fetchOlderHoldingCount={fetchMoreDataForChild}
+                    />
+                  </div>
+                ) : (
+                  <div className="h-full p-3 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800/50">
+                    <MetricsGrid 
+                      address={address} name={metadata_?.image} twitter={metadata_?.twitter} symbol={metadata_?.symbol}Frequency={frequency} 
+                      Tweets={tweets} Values={values} SEI={sei} FOMO={fomo} TweetImpression={tweetImpression} 
+                      Views={views} ViewsAlt={viewsAlt} HypeMeter={hypeMeter}
+                      holders={holderRawData} live_prx={livePrice} aiNarrative={aiNarrative}
+                      fetchOlderHoldingCount={fetchMoreDataForChild}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           </aside>
 
-          {/* Right Panel (Watchlist) - Fixed width, full height of its column */}
+          {/* Right Panel (Watchlist) - Fixed width, full height */}
           <aside className="w-64 flex-shrink-0">
              <Watchlist />
           </aside>
@@ -795,10 +949,10 @@ export default function Home() {
                  <BarChartBig size={16} className="text-yellow-400" />
               </div>
               <MetricsGrid 
-                address={address} name={metadata_?.image} twitter={metadata_?.twitter} Frequency={frequency} 
+                address={address} name={metadata_?.image} twitter={metadata_?.twitter} symbol={metadata_?.symbol} Frequency={frequency} 
                 Tweets={tweets} Values={values} SEI={sei} FOMO={fomo} TweetImpression={tweetImpression} 
                 Views={views} ViewsAlt={viewsAlt} HypeMeter={hypeMeter}
-                holders={holderRawData} live_prx={livePrice}
+                holders={holderRawData} live_prx={livePrice} aiNarrative={aiNarrative}
                 fetchOlderHoldingCount={fetchMoreDataForChild}
               />
             </div>

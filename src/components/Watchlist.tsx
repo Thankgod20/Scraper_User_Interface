@@ -53,7 +53,7 @@ const Watchlist: React.FC = () => {
       // In production, ensure the API server has proper CORS configuration.
       // const response = await fetch(`https://cors-anywhere.herokuapp.com/http://51.20.10.190:3300/addresses/address.json`);
       // For now, assuming direct access or a local proxy is set up.
-      const response = await fetch(`http://51.20.10.190:3300/addresses/address.json`);
+      const response = await fetch(`http://16.16.25.81:3300/addresses/address.json`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -146,7 +146,9 @@ const Watchlist: React.FC = () => {
     }
     
     const sorted = sortCoins(filtered, sortConfig);
-    setFilteredCoins(sorted);
+    const uniqueSorted = Array.from(new Map(sorted.map(c => [c.address, c])).values());
+
+    setFilteredCoins(uniqueSorted);
   }, [searchTerm, coins, sortConfig, sortCoins]);
 
   const handleCoinSelect = (address: string) => {
@@ -308,6 +310,7 @@ const Watchlist: React.FC = () => {
               </tr>
             </thead>
             <tbody>
+            
               {filteredCoins.map((coin) => (
                 <tr
                   key={coin.address}

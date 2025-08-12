@@ -4,20 +4,21 @@ import {
   parseViewsCount, groupTweetsWithAddressByInterval,
   calculateTweetFrequencyTrendPercentage, categorizeTweetsByInterval,
   calculateCumulativeRatioPercentage, calculateAverageViewsPerTweet,
-  computeImpressionsTimeSeries, computeSEIEMA, computeTimeBasedSEI,
-  computeOscillatingSEIVelocity, getDynamicSpikes, computeTimeBasedFOMO,
+  computeImpressionsTimeSeries,computeViewVelocityImpressions,computeRawImpressionsByTierTimeSeries,computeAccountCountsFromTweetEngagementData, computeSEIEMA, computeTimeBasedSEI,
+  computeOscillatingSEIVelocity, getDynamicSpikes, computeTimeBasedFOMO,detectFomoPoints,
   computeMetricsBins, computeCompositeFOMOIndex, computeMACD, computeRSI,
   categorizeTweetsByIntervalC, calculateSentimentTrend, computeSentimentTimeSeries,
-  calculateAveragePercentage, calculateSentimentScore
+  calculateAveragePercentage, calculateSentimentScore,calculateFomoFromTweetEntries
 } from '@/app/utils/holdersfunct';
 import { Engagement, Impression, CompImpression, TimeSeriess, MACDPoint } from '@/app/utils/app_types';
 import { NumberFormatter } from '@/app/utils/largeNumber';
 import redis from '@/lib/redis';
+// Import the new function and its type at the top of your page file
 
 // Cache configuration
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache lifetime
 const refreshing: Record<string, boolean> = {};
-
+//const [time, setTime] = useState(false)
 interface TweetEntry {
   tweet: string;
   params: {
@@ -55,6 +56,7 @@ interface TweetEngagementData {
 
 interface TweetDetail {
   extractedUsernames: string[];
+  extractedUserfollowers: string[];
   extractedTweets: string[];
   extractedView: string[];
   extractedLikes: string[];
@@ -74,20 +76,138 @@ interface PaginatedResponse {
   [key: string]: unknown;
 }
 
+interface TweetData {
+  tweetDetail: {
+    extractedUsernames: string[];
+    extractedUserfollowers: string[];
+    extractedTweets: string[];
+    extractedTimes: string[];
+    extractedView: string[];
+    extractedLikes: string[];
+    extractedProfile: string[];
+  };
+  emojiArray: Array<{
+    em_time: number;
+    emoji: string;
+  }>;
+  frequency: {
+    tweetFrequencyTrend: Array<{ name: string; value: number }>;
+    tweetsWithAddressFrequency: Array<{ name: string; value: number }>;
+  };
+  tweetperMinutes: {
+    tweetsPerMinuteArray: Array<{ name: string; value: number }>;
+    tweetPerFVmints: Array<{ name: string; value: number }>;
+    tweetsWithAddressCount: Array<{ name: string; value: number }>;
+    totalTweets: string;
+    averagePercentageFv: number;
+    averagePercentage: number;
+    numbottweet: number;
+  };
+  SEI: {
+    SEI_value: Array<{ name: string; value: number }>;
+    SEI_Velocity: Array<{ name: string; value: number }>;
+    SEI_EMA: Array<{ name: string; value: number }>;
+  };
+  Fomo: {
+    tweetFomo: Array<{ name: string; value: number }>;
+    compositFomo: Array<{ name: string; value: number }>;
+    macd: Array<{ 
+      name: string; 
+      macd: number; 
+      signal: number; 
+      histogram: number; 
+    }>;
+    RSI: Array<{ name: string; value: number }>;
+  };
+  impression: {
+    weighBasedImpression: Array<{ 
+      name: string; 
+      value: number; 
+      posImpressions: number; 
+      negImpressions: number; 
+      engagementRate: number; 
+    }>;
+    sentimentTrend: Array<{ 
+      name: string; 
+      value: number; 
+      posImpressions: number; 
+      negImpressions: number; 
+      engagementRate: number; 
+    }>;
+    EWMA_Value: Array<{ name: string; value: number }>;
+    tiredImpression: Array<{
+      name: string;
+      whale: { impressions: number; engagement: number; volume: number };
+      shark: { impressions: number; engagement: number; volume: number };
+      retail: { impressions: number; engagement: number; volume: number };
+    }>;
+    tieredAccountCount: Array<{
+      name: string;
+      whale: number;
+      shark: number;
+      retail: number;
+    }>;
+    tweetvelocityImpressions: Array<{
+      name: string;
+      newUniqueViewers: number;
+      cumulativeUniqueViewers: number;
+      posImpressions: number;
+      negImpressions: number;
+      engagementRate: number;
+    }>;
+  };
+  views: {
+    tweetViewsPerFVmints: Array<{ name: string; value: number; preval: number }>;
+    tweetsWithAddressViews: Array<{ name: string; value: number; preval: number }>;
+    tweetViewsRatioPercentage: Array<{ name: string; value: number }>;
+    avgViewsPerTweet: number;
+    tweetwithAddAvgViews: number;
+  };
+  hype: {
+    sentiMeter: number;
+    sentiMeterAddr: number;
+  };
+  aiAnalysis: {
+    mainNarrative: string;
+    keyThemes: {
+      positive: string[];
+      negative: string[];
+    };
+    narrativeScore: number;
+    scoreReasoning: string;
+    summary: string;
+  };
+  meta: {
+    currentPage: number;
+    totalPages: number;
+    pageSize: number;
+    totalItems: number;
+  };
+}
+
+
+let alldataPlot = false
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     // Extract params
     const { searchParams } = new URL(req.url);
+    console.log("searchParams", searchParams)
     const address = searchParams.get('address');
     const symbol = searchParams.get('symbol');
     const funtype = searchParams.get('type');
+    const alldata = searchParams.get('alldata');
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '50', 10);
-
+    const time = searchParams.get('time') || '';
     if (!address) {
       return NextResponse.json({ error: 'Missing address' }, { status: 400 });
     }
-
+    if (alldata) {
+      console.log("alldata is true")
+      alldataPlot= true;
+    } else {
+      alldataPlot= false;
+    }
     // Generate cache key based on all parameters
     const cacheKey = `${address}-${symbol || ''}-${funtype || ''}`;
     const redisKey = `sentim:${cacheKey}`;
@@ -105,7 +225,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       data = await fetchAndProcessData(address, symbol, funtype);
       await redis.set(redisKey, JSON.stringify(data), 'EX', CACHE_TTL);
     }
-
+    if (time !='') {
+      console.log("time is not empty", time)
+      const [startTime, endTime] = time.split(" to ").map(t => t.trim());
+      const timePaginate = filterDataByTime(data as unknown as TweetData, startTime,endTime);
+      console.log("timePaginate", timePaginate)
+      return NextResponse.json(timePaginate);
+    } 
+    
     // Apply pagination to the data
     const paginatedData = applyPagination(data, page, limit);
     
@@ -192,6 +319,7 @@ function applyPagination(data: Record<string, unknown>, page: number, limit: num
     // Create a new object with paginated arrays
     return {
       extractedUsernames: paginatedIndices.map(i => tweetDetails.extractedUsernames[i]),
+      extractedUserfollowers: paginatedIndices.map(i => tweetDetails.extractedUserfollowers[i]),
       extractedTweets: paginatedIndices.map(i => tweetDetails.extractedTweets[i]),
       extractedView: paginatedIndices.map(i => tweetDetails.extractedView[i]),
       extractedLikes: paginatedIndices.map(i => tweetDetails.extractedLikes[i]),
@@ -278,6 +406,8 @@ function applyPagination(data: Record<string, unknown>, page: number, limit: num
 }
 
 // Main data processing function
+
+
 async function fetchAndProcessData(
   address: string | null,
   symbol: string | null,
@@ -287,11 +417,87 @@ async function fetchAndProcessData(
     throw new Error('Missing address');
   }
 
-  // Fetch data from backend API
   const hostname = process.env.DATA_HOST || 'localhost';
-  const response = await fetch(`http://${hostname}:3310/fetch-data?search=${address}`);
-  const jsonData = await response.json() as TweetEntry[];
+  const limit = 1000;
+  let allTweetData: TweetEntry[] = [];
+  let currentPage = 1;
+  let totalPages = 1;
 
+  try {
+    // Fetch first page to get pagination info
+    const firstResponse = await fetch(
+      `http://${hostname}:3300/fetch-data?search=${address}&limit=${limit}&page=1`
+    );
+    
+    if (!firstResponse.ok) {
+      throw new Error(`HTTP error! status: ${firstResponse.status}`);
+    }
+    
+    const firstPageData = await firstResponse.json();
+    
+    // Add first page data
+    if (Array.isArray(firstPageData.data)) {
+      allTweetData.push(...firstPageData.data);
+      totalPages = firstPageData.total_pages || 1;
+    } else {
+      // Handle case where response is directly an array (backward compatibility)
+      if (Array.isArray(firstPageData)) {
+        allTweetData.push(...firstPageData);
+        totalPages = 1;
+      } else {
+        throw new Error('Invalid response format');
+      }
+    }
+    
+    console.log(`Fetching ${totalPages} pages`);
+
+    // If there are more pages, fetch them concurrently
+    if (totalPages > 1) {
+      const pagePromises: Promise<TweetEntry[]>[] = [];
+      
+      // Create promises for remaining pages (2 to totalPages)
+      for (let page = 2; page <= totalPages; page++) {
+        const pagePromise = fetch(
+          `http://${hostname}:3300/fetch-data?search=${address}&limit=${limit}&page=${page}`
+        )
+          .then(async (response) => {
+            if (!response.ok) {
+              throw new Error(`HTTP error on page ${page}! status: ${response.status}`);
+            }
+            const pageData = await response.json();
+            return Array.isArray(pageData.data) ? pageData.data : [];
+          })
+          .catch((error) => {
+            console.error(`Error fetching page ${page}:`, error);
+            return []; // Return empty array on error to continue with other pages
+          });
+        
+        pagePromises.push(pagePromise);
+      }
+
+      // Wait for all pages to complete
+      const pageResults = await Promise.all(pagePromises);
+      
+      // Flatten and add all page results
+      pageResults.forEach((pageData) => {
+        if (Array.isArray(pageData)) {
+          allTweetData.push(...pageData);
+        }
+      });
+    }
+
+    console.log(`Successfully fetched ${allTweetData.length} tweet entries across ${totalPages} pages`);
+    
+    // Process and return the data (keeping original structure)
+    //return allTweetData as any;
+
+  } catch (error) {
+    console.error('Error in fetchAndProcessData:', error);
+    throw new Error(`Failed to fetch data: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+  const jsonData = allTweetData as TweetEntry[];
+    // Process and return the data (keeping original structure)
+    //return allTweetData as u
   // Process data to calculate total views for each unique time
   const viewCounts: { [key: string]: number } = {};
   const tweetEngagementCounts: { [key: string]: TweetEngagementData } = {};
@@ -300,6 +506,7 @@ async function fetchAndProcessData(
   const tweetViews: { [key: string]: { last: number; prev: number } } = {};
   const emojiData: { [key: number]: string } = {};
   const extractedUsernames: string[] = [];
+  const extractedUserfollowers: string[] = [];
   const extractedTweets: string[] = [];
   const extractedView: string[] = [];
   const extractedLikes: string[] = [];
@@ -326,12 +533,13 @@ async function fetchAndProcessData(
 
   const tweetsWithAddress = filteredData;
   
-  // Filter valid entries
   const validEntries = jsonData.filter((entry: TweetEntry) => {
+  if (!entry.tweet || !entry.params) return false;
       return entry.tweet && (entry.tweet.includes(address) || (symbol && entry.tweet.includes(symbol)));
   });
   validEntries.sort((a: TweetEntry, b: TweetEntry) => new Date(b.post_time).getTime() - new Date(a.post_time).getTime());
-
+  let tweetcnt = 0
+  let numbottweet = 0
   // Process each entry
   validEntries.forEach((entry: TweetEntry) => {
       const times = entry.params.time;
@@ -351,22 +559,56 @@ async function fetchAndProcessData(
       }
       
       extractedUsernames.push("@" + username);
+      extractedUserfollowers.push(followers.toString())
       extractedTweets.push(entry.tweet);
       extractedView.push(views[views.length - 1]);
       extractedLikes.push(likes[likes.length - 1]);
       extractedTimes.push(timestamp);
-      
+      const botPatterns = [
+        // 1. Starts with "CA" or "Ca:" etc., followed by an address. (Your original, improved)
+        // Catches: "CA: 3aG7S...", "ca > 3aG7S..."
+        /^ca\s*[:>)]*\s*[1-9A-HJ-NP-Za-km-z]{32,44}/i,
+  
+        // 2. Starts with a ticker symbol, followed by a CA somewhere in the post. (Generalizes your $GMTRUMP rule)
+        // Catches: "$DID\nCA: 3aG7S...", "$DID some text 3aG7S..."
+        /^\$[a-zA-Z0-9_]+\b.*[1-9A-HJ-NP-Za-km-z]{32,44}/i,
+  
+        // 3. Catches common bot/alert keywords and emojis. This is highly effective.
+        // Catches: "🤖 FDV Alert 🤖", "📣 Alert 👉", "🔥 FDV Surge Alert 🔥", "💎 DEX paid for..."
+        /(🤖|🚨|📣|🔥|⚡|💎| Alert | Trending | Signal | DEX paid | TOP CALL|QUICK TRADE|FDV Surge|AI Alpha)/i,
+  
+        // 4. Catches wallet tracker bots that post buy/sell activity.
+        // Catches: "Cupseyy just sold $1587.22 of $did...", "Assasin (@assasin_eth) just bought..."
+        /\b(just sold|just bought|sold|bought)\b\s*\$[0-9,.]+\s*of\s*\$[a-zA-Z0-9_]+/i,
+  
+        // 5. Catches the common bot format of reporting percentage gains with dollar values.
+        // Catches: "📈 - 10MIN 🆙 +$39.8K(+31.19%)"
+        /\s\+\$?[\d,.]+[kK]?\s*\(\+?\d+\.?\d*%\)/,
+  
+        // 6. Catches "X gain" or "X profit" call-out posts, which are often from shill accounts.
+        // Catches: "Over 4x done on $DID", "3x profit from my call on $did"
+        /\b\d+\.?\d*\s?x\s*(up|pump|gain|profit|done on)/i,
+        
+        // 7. Catches generic posts that are just the address and nothing else of substance.
+        // Catches a tweet containing ONLY a Solana address and optional whitespace.
+        /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
+      ];
+  
+      if (botPatterns.some(pattern => pattern.test(entry.tweet))) {
+          //console.log("======Bot Tweets======", text)
+          numbottweet += 1;
+      }
       let minuteKey: string;
       if (timestamp) {
           try {
-              minuteKey = new Date(timestamp).toISOString().slice(0, 16);
+              minuteKey = new Date(timestamp).toISOString()//.slice(0, 16);
           } catch (error) {
               console.warn("Invalid timestamp:", timestamp, error);
-              minuteKey = new Date().toISOString().slice(0, 16);
+              minuteKey = new Date().toISOString()//.slice(0, 16);
           }
       } else {
           console.warn("Timestamp is empty or null, using current time.");
-          minuteKey = new Date().toISOString().slice(0, 16);
+          minuteKey = new Date().toISOString()//.slice(0, 16);
       }
       
       const emojiTimeStamp = new Date(timestamp).setSeconds(0, 0);
@@ -394,7 +636,7 @@ async function fetchAndProcessData(
               viewCounts[plot_mint] = view;
           }
           
-          if (entry.tweet.includes(address)) {
+          if (entry.tweet.includes(address) || alldataPlot) {
               const impression = (like) + (comment) + (retweet*2);
               
               if (tweetEngagementCounts[plot_mint]) {
@@ -437,7 +679,9 @@ async function fetchAndProcessData(
               engagementCounts[plot_mint] = ((like) + (comment) + (retweet*2));
           }
 
-          if (entry.tweet.includes(address)) {
+          if (entry.tweet.includes(address) || alldataPlot) {
+   
+            //console.log("Tweet Count g",tweetcnt)
             if (!engagementMap[plot_mint]) {
               engagementMap[plot_mint] = {};
             }
@@ -450,7 +694,9 @@ async function fetchAndProcessData(
                     retweets: retweet,
                     comments: comment,
                     followers: followers,
-                    count: 1
+                    count: 1,
+                    post_time: timestamp, // ✅ Add this
+                    tweet: entry.tweet // Add tweet text for AI analysis
                 };
             } else {
                 const bucket = engagementMap[plot_mint][username];
@@ -461,12 +707,14 @@ async function fetchAndProcessData(
                 const prevRetweets = bucket.retweets;
                 const prevComments = bucket.comments;
                 bucket.impressions = ((prevImpression*(vCount-1))+view)/vCount;
-                bucket.likes = ((prevLikes*(vCount-1))+like)/vCount;
-                bucket.retweets = ((prevRetweets*(vCount-1))+retweet)/vCount;
-                bucket.comments = ((prevComments*(vCount-1))+comment)/vCount;
+                bucket.likes = Math.floor((prevLikes*(vCount-1))+like)/vCount;
+                bucket.retweets = Math.floor((prevRetweets*(vCount-1))+retweet)/vCount;
+                bucket.comments = Math.floor((prevComments*(vCount-1))+comment)/vCount;
                 bucket.followers = followers;
             }
+           tweetcnt+=1; 
           }
+          
       });
       
       if (tweetCounts[minuteKey]) {
@@ -502,24 +750,72 @@ async function fetchAndProcessData(
               emojiData[emojiTimeStamp] = "😎";
           }
       }
-  });
-    
+      
+  });/*
+  let aiAnalysis: AINarrativeResponse | null = null;
+  if (extractedTweets.length > 0) {
+    console.log(`Sending ${extractedTweets.length} tweets to AI for narrative analysis...`);
+    try {
+      aiAnalysis = await getAINarrativeAnalysis(extractedTweets);
+      //console.log("AI Analysis result:", aiAnalysis);
+    } catch (e) {
+        console.error("AI Analysis step failed:", e);
+        // aiAnalysis will remain null and you can handle this on the frontend
+    }
+  } else {
+    console.log("No tweets found to send for AI analysis.");
+  }*/
   // Convert engagement map to array
+  function convertToUTCFormat(dateStr: string): string {
+    // Handle malformed ISO format: "2025-07-14T13:09.000+00:00" -> "2025-07-14T13:09:00.000+00:00"
+    if (dateStr.includes('T') && dateStr.includes('.000') && !dateStr.includes(':00.000')) {
+      // Pattern: YYYY-MM-DDTHH:MM.000 (missing seconds)
+      dateStr = dateStr.replace(/T(\d{2}):(\d{2})\.000/, 'T$1:$2:00.000');
+    }
+    
+    // If already has timezone info, return as is
+    if (dateStr.includes('+') || dateStr.includes('Z')) {
+      return dateStr;
+    }
+    
+    let formatted = dateStr;
+    
+    // Handle fractional seconds (truncate to 3 digits or add .000)
+    if (!formatted.includes('.')) {
+      // Add seconds if missing: "2025-07-14T13:09" -> "2025-07-14T13:09:00"
+      if (formatted.match(/T\d{2}:\d{2}$/)) {
+        formatted += ':00';
+      }
+      formatted += '.000';
+    } else {
+      // Truncate fractional seconds to 3 digits
+      formatted = formatted.replace(/(\.\d{3})\d*/, '$1');
+    }
+    
+    // Add UTC timezone if not present
+    if (!formatted.includes('+') && !formatted.includes('Z')) {
+      formatted += '+00:00';
+    }
+    
+    return formatted;
+  }
   const engagementArray: Engagement[] = Object.values(engagementMap)
       .flatMap(userMap => Object.values(userMap))
       .sort((a, b) =>
         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
       )
       .map(data => ({
-        timestamp:   data.timestamp,
+        timestamp:   convertToUTCFormat(data.timestamp).replace('+00:00', 'Z'),
         impressions: data.impressions,
         likes:       data.likes,
         retweets:    data.retweets,
         comments:    data.comments,
         followers:   data.followers,
-        count:       data.count
+        count:       data.count,
+        post_time: data.post_time,
+        tweet: data.tweet // Include the tweet text for AI analysis
       }));
-  
+      //console.log("engagementArray", engagementArray)
   // Create time series
   const tweetsPerMinuteArray = Object.entries(tweetCounts).map(([name, value]) => ({
       name,
@@ -548,6 +844,7 @@ async function fetchAndProcessData(
     (sum, { value }) => sum + value,
     0
   );
+
   const tweetwithAddAvgViews = calculateAverageViewsPerTweet(tweetsWithAddressViews, tweetsWithAddressCount);
   const tweetsWithAddressFrequency = calculateTweetFrequencyTrendPercentage(tweetsWithAddressCount, 5, 3, 80);
   const totalTweets_ = tweetsPerMinuteArray.reduce((sum, tweet) => sum + tweet.value, 0);
@@ -563,23 +860,27 @@ async function fetchAndProcessData(
   const averagePercentageFv = calculateAveragePercentage(tweetPerFVmints);
   
   const averagePercentage = calculateAveragePercentage(tweetsPerMinuteArray);
-  const weighBasedImpression = computeImpressionsTimeSeries(engagementArray, 5);
+  const tiredImpression = computeRawImpressionsByTierTimeSeries(engagementArray, 1);
+  const tieredAccountCount =computeAccountCountsFromTweetEngagementData(tweetEngagementCounts)
+
+  const weighBasedImpression = computeImpressionsTimeSeries(engagementArray, 1);
   const EWMA_Value = computeSEIEMA(weighBasedImpression, 14);
   const SEI_value_x = computeTimeBasedSEI(engagementArray, 5);
   const SEI_EMA = computeSEIEMA(SEI_value_x, 14);
   const SEI_Velocity = computeOscillatingSEIVelocity(SEI_value_x, engagementArray, 15);
   const SEI_value = getDynamicSpikes(SEI_value_x);
   
-  const tweetFomo = computeTimeBasedFOMO(engagementArray, 2, 0.2);
+  const tweetFomo = detectFomoPoints(engagementArray,5,0.2)//computeTimeBasedFOMO(engagementArray, 1, 0.2);
   const getMetricGrid = computeMetricsBins(engagementArray, 5, 5);
   const compositFomo = computeCompositeFOMOIndex(getMetricGrid);
   const macd = computeMACD(tweetFomo);
   const RSI = computeRSI(tweetFomo);
   const tweetFrequencyTrend_ = calculateTweetFrequencyTrendPercentage(tweetsPerMinuteArray, 5, 5, 100);
+  const tweetvelocityImpressions = computeViewVelocityImpressions(filteredTweets, 0.3);
   const currentTweetFrequencyTrend = tweetFrequencyTrend_[tweetFrequencyTrend_.length - 1]?.value || 0;
   const timeseries = computeSentimentTimeSeries(validEntries);
   const sentimentTrend = calculateSentimentTrend(timeseries, 30);
-  const currentSentimentTrend = sentimentTrend[sentimentTrend.length - 1]?.aggregatedSentiment || 0;
+  const currentSentimentTrend = sentimentTrend[sentimentTrend.length - 1]?.value || 0;
   const tweetViewsPerFVmints = categorizeTweetsByIntervalC(tweetsPerViewsMinuteArray, 5);
   const avgLstView = calculateAverageViewsPerTweet(tweetViewsPerFVmints.slice(-15), tweetViewsPerFVmints.slice(-15));
   const currentTweetWiAddFrequencyTrend = tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1]?.value || 0;
@@ -590,13 +891,14 @@ async function fetchAndProcessData(
 
   // Structure data for different function types
   const frequency = { tweetFrequencyTrend, tweetsWithAddressFrequency };
-  const tweetperMinutes = { tweetsPerMinuteArray, tweetPerFVmints, tweetsWithAddressCount, totalTweets, averagePercentageFv, averagePercentage };
+  const tweetperMinutes = { tweetsPerMinuteArray, tweetPerFVmints, tweetsWithAddressCount, totalTweets, averagePercentageFv, averagePercentage ,numbottweet};
   const SEI = { SEI_value, SEI_Velocity, SEI_EMA };
   const Fomo = { tweetFomo, compositFomo, macd, RSI };
-  const impression = { weighBasedImpression, sentimentTrend, EWMA_Value };
+  const impression = { weighBasedImpression, sentimentTrend, EWMA_Value ,tiredImpression,tieredAccountCount,tweetvelocityImpressions};
   const views = { tweetViewsPerFVmints, tweetsWithAddressViews, tweetViewsRatioPercentage, avgViewsPerTweet, tweetwithAddAvgViews };
   const hype = { sentiMeter, sentiMeterAddr };
-  const tweetDetail = { extractedUsernames, extractedTweets, extractedView, extractedLikes, extractedTimes, extractedProfile };
+  //console.log("AI Analysis result:", aiAnalysis);
+  const tweetDetail = { extractedUsernames,extractedUserfollowers, extractedTweets, extractedView, extractedLikes, extractedTimes, extractedProfile };
   
   switch (funtype) {
     case "frequency":
@@ -661,824 +963,299 @@ async function fetchAndProcessData(
         views,
         hype,
         tweetDetail,
-        emojiArray
-      };
-  }
-}
-
-/*import { NextRequest, NextResponse } from 'next/server';
-import { 
-  computeSellOffRiskScore, parseViewsCount, groupTweetsWithAddressByInterval,
-  calculateTweetFrequencyTrendPercentage, categorizeTweetsByInterval,
-  calculateCumulativeRatioPercentage, calculateAverageViewsPerTweet,
-  computeImpressionsTimeSeries, computeSEIEMA, computeTimeBasedSEI,
-  computeOscillatingSEIVelocity, getDynamicSpikes, computeTimeBasedFOMO,
-  computeMetricsBins, computeCompositeFOMOIndex, computeMACD, computeRSI,
-  categorizeTweetsByIntervalC, calculateSentimentTrend, computeSentimentTimeSeries,
-  calculateAveragePercentage, calculateSentimentScore
-} from '@/app/utils/holdersfunct';
-import { Engagement, Impression, CompImpression, TimeSeriess, MACDPoint } from '@/app/utils/app_types';
-import { NumberFormatter } from '@/app/utils/largeNumber';
-import redis from '@/lib/redis';
-// Cache configuration
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache lifetime
-
-const refreshing: Record<string, boolean> = {};
-
-export async function GET(req: NextRequest) {
-  try {
-    // Extract params
-    const { searchParams } = new URL(req.url);
-    const address = searchParams.get('address');
-    const symbol = searchParams.get('symbol');
-    const funtype = searchParams.get('type');
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = parseInt(searchParams.get('limit') || '50', 10);
-
-    if (!address) {
-      return NextResponse.json({ error: 'Missing address' }, { status: 400 });
-    }
-
-    // Generate cache key based on all parameters
-    const cacheKey = `${address}-${symbol || ''}-${funtype || ''}`;
-    const redisKey = `sentim:${cacheKey}`;
-    const cacheEntry =  await redis.get(redisKey);//cache[address];
-    //const isFresh = cacheEntry && (Date.now() - cacheEntry.timestamp < CACHE_TTL);
-
-    let data;
-
-    // Handle cache scenarios
-    
-    if (cacheEntry) {
-      // If cache exists but stale, trigger background refresh and use stale data
-      triggerBackgroundRefresh(cacheKey,redisKey, address, symbol, funtype);
-      data =  JSON.parse(cacheEntry);//cacheEntry.data;
-    } else {
-      // No cache - compute data and cache it
-      data = await fetchAndProcessData(address, symbol, funtype);
-      await redis.set(redisKey, JSON.stringify(data), 'EX', CACHE_TTL);
-      
-    }
-
-    // Apply pagination to the data - use our custom function that handles nested objects
-    const paginatedData = applyPagination(data, page, limit);
-    
-    return NextResponse.json(paginatedData);
-  } catch (err: any) {
-    console.error('Server error:', err);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
-  }
-}
-
-// Helper function to trigger background refresh
-function triggerBackgroundRefresh(cacheKey: string,redisKey: string, address: string | null, symbol: string | null, funtype: string | null) {
-  if (refreshing[cacheKey]) return;
-  
-  console.log(`Triggering background refresh for ${cacheKey}`);
-  refreshing[cacheKey] = true;
-  
-  fetchAndProcessData(address, symbol, funtype)
-    .then(async (data) => {
-      
-      await redis.set(redisKey, JSON.stringify(data), 'EX', CACHE_TTL);
-      console.log(`Cache refreshed for ${cacheKey}`);
-    })
-    .catch(err => {
-      console.error(`Background refresh failed for ${cacheKey}:`, err);
-    })
-    .finally(() => {
-      refreshing[cacheKey] = false;
-    });
-}
-
-function applyPagination(data: any, page: number, limit: number) {
-  const result: any = {};
-  
-  // Helper function to paginate arrays
-  const paginateArray = (array: any[]) => {
-    if (!array || !Array.isArray(array)) return array;
-    
-    // Sort in reverse chronological order if the array has time-related properties
-    const sortedArray = [...array].sort((a, b) => {
-      if (a.name && b.name) {
-        return new Date(b.name).getTime() - new Date(a.name).getTime();
-      } else if (a.timestamp && b.timestamp) {
-        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-      } else if (a.time && b.time) {
-        return new Date(b.time).getTime() - new Date(a.time).getTime();
-      } else if (a.em_time && b.em_time) {
-        return b.em_time - a.em_time;
-      }
-      return 0;
-    });
-    
-    const start = (page - 1) * limit;
-    const end = start + limit;
-    return sortedArray.slice(start, end);
-  };
-  
-  // Custom pagination for tweet details which require special handling
-  const paginateTweetDetails = (details: any) => {
-    if (!details) return details;
-    
-    const times = details.extractedTimes;
-    if (!times || !Array.isArray(times)) return details;
-    
-    // Sort indices by time in reverse chronological order
-    const sortedIndices = times
-      .map((time, idx) => ({ time: new Date(time).getTime(), idx }))
-      .sort((a, b) => b.time - a.time)
-      .map(item => item.idx);
-    
-    const start = (page - 1) * limit;
-    const end = start + limit;
-    const paginatedIndices = sortedIndices.slice(start, end);
-    
-    // Create a new object with paginated arrays
-    return {
-      extractedUsernames: paginatedIndices.map(i => details.extractedUsernames[i]),
-      extractedTweets: paginatedIndices.map(i => details.extractedTweets[i]),
-      extractedView: paginatedIndices.map(i => details.extractedView[i]),
-      extractedLikes: paginatedIndices.map(i => details.extractedLikes[i]),
-      extractedTimes: paginatedIndices.map(i => details.extractedTimes[i]),
-      extractedProfile: paginatedIndices.map(i => details.extractedProfile[i]),
-    };
-  };
-  
-  // Special handling for tweetDetail
-  if (data.tweetDetail) {
-    result.tweetDetail = paginateTweetDetails(data.tweetDetail);
-  }
-  
-  // Handle emojiArray directly since it's at the top level
-  if (data.emojiArray) {
-    result.emojiArray = paginateArray(data.emojiArray);
-  }
-  
-  // Process nested objects that contain arrays
-  for (const key in data) {
-    if (key === 'tweetDetail' || key === 'emojiArray') {
-      // Already handled
-      continue;
-    }
-    
-    const value = data[key];
-    
-    if (typeof value === 'object' && value !== null) {
-      if (Array.isArray(value)) {
-        // Directly paginate top-level arrays
-        result[key] = paginateArray(value);
-      } else {
-        // Handle nested objects
-        result[key] = {};
+        emojiArray,
         
-        for (const subKey in value) {
-          const subValue = value[subKey];
-          
-          if (Array.isArray(subValue)) {
-            // Paginate arrays inside nested objects
-            result[key][subKey] = paginateArray(subValue);
-          } else {
-            // Copy non-array values
-            result[key][subKey] = subValue;
-          }
-        }
-      }
-    } else {
-      // Copy primitive values
-      result[key] = value;
-    }
-  }
-  
-  // Calculate total pages based on the largest array size
-  let maxArraySize = 0;
-  
-  // Helper to find the largest array size in the data
-  const findMaxArraySize = (obj: any) => {
-    if (!obj || typeof obj !== 'object') return;
-    
-    if (Array.isArray(obj)) {
-      maxArraySize = Math.max(maxArraySize, obj.length);
-    } else {
-      for (const key in obj) {
-        findMaxArraySize(obj[key]);
-      }
-    }
-  };
-  
-  findMaxArraySize(data);
-  
-  // Add pagination metadata
-  result.meta = {
-    currentPage: page,
-    totalPages: Math.max(1, Math.ceil(maxArraySize / limit)),
-    pageSize: limit,
-    totalItems: maxArraySize
-  };
-  
-  return result;
-}
-
-// Main data processing function
-async function fetchAndProcessData(address: string | null, symbol: string | null, funtype: string | null) {
-  if (!address) {
-    throw new Error('Missing address');
-  }
-
-  // Fetch data from backend API
-  const hostname = process.env.DATA_HOST || 'localhost';
-  const response = await fetch(`http://${hostname}:3310/fetch-data?search=${address}`);
-  const jsonData = await response.json();
-
-  // Process data to calculate total views for each unique time
-  const viewCounts: { [key: string]: number } = {};
-  const tweetEngagementCounts: { 
-    [key: string]: {
-      totalTweet: number; 
-      usernames: {
-        [username: string]: {
-          count: number; 
-          impression: number; 
-          views: number;
-          followers: number
-        }
-      }
-    } 
-  } = {};
-  const engagementCounts: { [key: string]: number } = {};
-  const tweetCounts: { [key: string]: number } = {};
-  const tweetViews: { [key: string]: { last: number; prev: number } } = {};
-  const emojiData: { [key: number]: string } = {};
-  const extractedUsernames: string[] = [];
-  const extractedTweets: string[] = [];
-  const extractedView: string[] = [];
-  const extractedLikes: string[] = [];
-  const extractedTimes: string[] = [];
-  const extractedProfile: string[] = [];
-  let engagementMap: Record<string, Record<string, Engagement>> = {};
-
-  // Filter tweets that include the target address
-  const filteredTweets = jsonData.filter((entry: any) => {
-      return entry.tweet && entry.tweet.includes(address);
-  });
-  
-  const filteredData = filteredTweets.map((entry: any) => {
-      const views = entry.params.views ? parseViewsCount(entry.params.views[entry.params.views.length - 1]) : 0;
-      const likes = entry.params.likes ? parseViewsCount(entry.params.likes[entry.params.likes.length - 1]) : 0;
-      const timestamp = entry.post_time ? entry.post_time : 0;
-      return {
-          tweet: entry.tweet,
-          views,
-          likes,
-          timestamp,
-      };
-  });
-
-  let tweetsWithAddress = filteredData;
-  
-  // Filter valid entries
-  const validEntries = jsonData.filter((entry: any) => {
-      return entry.tweet && (entry.tweet.includes(address) || (symbol && entry.tweet.includes(symbol)));
-  });
-  validEntries.sort((a:any, b:any) => new Date(b.post_time).getTime() - new Date(a.post_time).getTime());
-
-  // Process each entry
-  validEntries.forEach((entry: any) => {
-      const times = entry.params.time;
-      const views = entry.params.views;
-      const likes = entry.params.likes;
-      const comments = entry.params.comment;
-      const retweets = entry.params.retweet;
-      const timestamp = entry.post_time;
-      const eng_time = entry.params.plot_time;
-      const statusUrl = entry.status;
-      const profileImag = entry.profile_image;
-      const followers = entry.followers;
-      const username = statusUrl.split('https://x.com/')[1].split('/status/')[0];
-      
-      if (profileImag != undefined) {
-          extractedProfile.push(profileImag);
-      }
-      
-      extractedUsernames.push("@" + username);
-      extractedTweets.push(entry.tweet);
-      extractedView.push(views);
-      extractedLikes.push(likes);
-      extractedTimes.push(timestamp);
-      
-      let minuteKey;
-      if (timestamp) {
-          try {
-              minuteKey = new Date(timestamp).toISOString().slice(0, 16);
-          } catch (error) {
-              console.warn("Invalid timestamp:", timestamp, error);
-              minuteKey = new Date().toISOString().slice(0, 16);
-          }
-      } else {
-          console.warn("Timestamp is empty or null, using current time.");
-          minuteKey = new Date().toISOString().slice(0, 16);
-      }
-      
-      const emojiTimeStamp = new Date(timestamp).setSeconds(0, 0);
-      
-      times.forEach((time: number, index: number) => {
-          const view = isNaN(parseViewsCount(views[index])) ? 0 : parseViewsCount(views[index]);
-          const date = new Date(eng_time[index]);
-          
-          const pad = (num:any) => num.toString().padStart(2, '0');
-
-          const year = date.getFullYear();
-          const month = pad(date.getMonth() + 1);
-          const day = pad(date.getDate());
-          const hours = pad(date.getHours());
-          const minutes = pad(date.getMinutes());
-
-          const plot_mint = `${year}-${month}-${day}T${hours}:${minutes}`;
-          const like = isNaN(parseViewsCount(likes[index])) ? 0 : parseViewsCount(likes[index]);
-          const comment = isNaN(parseViewsCount(comments[index])) ? 0 : parseViewsCount(comments[index]);
-          const retweet = isNaN(parseViewsCount(retweets[index])) ? 0 : parseViewsCount(retweets[index]);
-          
-          const timeKey = `${time} min`;
-
-          if (viewCounts[plot_mint]) {
-              viewCounts[plot_mint] += view;
-          } else {
-              viewCounts[plot_mint] = view;
-          }
-          
-          if (entry.tweet.includes(address)) {
-              const impression = (like) + (comment) + (retweet*2);
-              
-              if (tweetEngagementCounts[plot_mint]) {
-                  tweetEngagementCounts[plot_mint].totalTweet += 1;
-                  if (tweetEngagementCounts[plot_mint].usernames[username]) {
-                      tweetEngagementCounts[plot_mint].usernames[username].count += 1;
-                      const prevAvgView = tweetEngagementCounts[plot_mint].usernames[username].views
-                      const vCount = tweetEngagementCounts[plot_mint].usernames[username].count;
-                      const prevImpression = tweetEngagementCounts[plot_mint].usernames[username].impression;
-                      const prevFollowers = tweetEngagementCounts[plot_mint].usernames[username].followers;
-                      tweetEngagementCounts[plot_mint].usernames[username].impression = ((prevImpression*(vCount-1))+impression)/vCount;
-                      
-                      tweetEngagementCounts[plot_mint].usernames[username].views = ((prevAvgView*(vCount-1))+view)/vCount;
-                      tweetEngagementCounts[plot_mint].usernames[username].followers = followers;
-                  } else {
-                      tweetEngagementCounts[plot_mint].usernames[username] = {
-                          count: 1,
-                          impression: impression,
-                          views: view,
-                          followers: followers
-                      };
-                  }
-              } else {
-                  tweetEngagementCounts[plot_mint] = {
-                      totalTweet: 1,
-                      usernames: {
-                          [username]: {
-                              count: 1,
-                              impression: impression,
-                              views: view,
-                              followers: followers
-                          }
-                      }
-                  };
-              }
-          }
-          
-          if (engagementCounts[plot_mint]) {
-              engagementCounts[plot_mint] += ((like) + (comment) + (retweet*2));
-          } else {
-              engagementCounts[plot_mint] = ((like) + (comment) + (retweet*2));
-          }
-
-          if (entry.tweet.includes(address)) {
-            if (!engagementMap[plot_mint]) {
-              engagementMap[plot_mint] = {};
-            }
-            const isNewEntry = !engagementMap[plot_mint][username];
-            if (isNewEntry) {
-              engagementMap[plot_mint][username] = {
-                    timestamp: plot_mint,
-                    impressions: view,
-                    likes: like,
-                    retweets: retweet,
-                    comments: comment,
-                    followers: followers,
-                    count: 1
-                };
-            } else {
-                const bucket = engagementMap[plot_mint][username];
-                bucket.count += 1;
-                const prevImpression = bucket.impressions
-                const vCount = bucket.count;
-                const prevLikes = bucket.likes;
-                const prevRetweets = bucket.retweets;
-                const prevComments = bucket.comments;
-                const prevFollowers = bucket.followers;
-                bucket.impressions = ((prevImpression*(vCount-1))+view)/vCount;
-                bucket.likes = ((prevLikes*(vCount-1))+like)/vCount;
-                bucket.retweets = ((prevRetweets*(vCount-1))+retweet)/vCount;;
-                bucket.comments = ((prevComments*(vCount-1))+comment)/vCount;;
-                bucket.followers = followers;
-            }
-          }
-      });
-      
-      if (tweetCounts[minuteKey]) {
-          tweetCounts[minuteKey] += 1;
-      } else {
-          tweetCounts[minuteKey] = 1;
-      }
-      
-      const view = isNaN(parseViewsCount(views[views.length-1])) ? 0 : parseViewsCount(views[views.length-1]);
-      let viewPrev = 0;
-      if (views.length > 1) {
-          viewPrev = isNaN(parseViewsCount(views[views.length-2])) ? 0 : parseViewsCount(views[views.length-2]);
-      }
-      
-      if (tweetViews[minuteKey]) {
-          tweetViews[minuteKey].last += view;
-          tweetViews[minuteKey].prev += viewPrev;
-      } else {
-          tweetViews[minuteKey] = { last: view, prev: viewPrev };
-      }
-      
-      if (!emojiData[emojiTimeStamp]) {
-          const sentiment = parseViewsCount(views[views.length - 1]);
-          if (sentiment > 10000) {
-              emojiData[emojiTimeStamp] = "💎";
-          } else if (sentiment > 5000) {
-              emojiData[emojiTimeStamp] = "♦️";
-          } else if (sentiment > 1000) {
-              emojiData[emojiTimeStamp] = "🥇";
-          } else if (sentiment > 500) {
-              emojiData[emojiTimeStamp] = "🥈";
-          } else {
-              emojiData[emojiTimeStamp] = "😎";
-          }
-      }
-  });
-    
-  // Convert engagement map to array
-  const engagementArray: Engagement[] = Object.values(engagementMap)
-      .flatMap(userMap => Object.values(userMap))
-      .sort((a, b) =>
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      )
-      .map(data => ({
-        timestamp:   data.timestamp,
-        impressions: data.impressions,
-        likes:       data.likes,
-        retweets:    data.retweets,
-        comments:    data.comments,
-        followers:   data.followers,
-        count:       data.count
-      }));
-  
-  // Create time series
-  const impressionsArray = Object.entries(viewCounts).map(([name, value]) => ({
-      name,
-      value
-  })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-  
-  const engamentArray = Object.entries(engagementCounts).map(([name, value]) => ({
-      name,
-      value
-  })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-  
-  const tweetsPerMinuteArray = Object.entries(tweetCounts).map(([name, value]) => ({
-      name,
-      value
-  })).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-  
-  const emojiArray = Object.entries(emojiData).map(([time, emoji]) => ({
-      em_time: parseInt(time, 10),
-      emoji,
-  })).sort((a, b) => a.em_time - b.em_time);
-  
-  const tweetsPerViewsMinuteArray = Object.entries(tweetViews)
-      .map(([name, data]) => ({
-          name,
-          value: data.last,
-          preval: data.prev
-      }))
-      .sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-  
-  // Modified: Process tweetEngagementCounts to average by username but count unique usernames for volume
-  const tweetsEngagementPlot = Object.entries(tweetEngagementCounts).map(([name, data]) => {
-      // Calculate averages per username
-      let totalImpression = 0;
-      let totalViews = 0;
-      let user_followers = 0;
-      const uniqueUsernames = Object.keys(data.usernames);
-      const uniqueUsernameCount = uniqueUsernames.length; // Count of unique usernames
-      
-      // Process each username's data
-      uniqueUsernames.forEach(username => {
-          const userData = data.usernames[username];
-          // Average the impressions and views for each username
-          totalImpression += userData.impression // userData.count;
-          totalViews += userData.views // userData.count;
-          user_followers += userData.followers;
-      });
-      return {
-          name,
-          impression: totalImpression,
-          views: totalViews,
-          volume: uniqueUsernameCount, // Set volume to the count of unique usernames
-          followers: user_followers,
-      };
-  }).sort((a, b) => new Date(a.name).getTime() - new Date(b.name).getTime());
-
-  // Compute metrics
-  const { count: tweetsWithAddressCount, views: tweetsWithAddressViews } = groupTweetsWithAddressByInterval(
-    tweetsWithAddress,
-    5
-  );
-  const totalTweetsWithAddress = tweetsWithAddressCount.reduce(
-    (sum, { value }) => sum + value,
-    0
-  );
-  const tweetwithAddAvgViews = calculateAverageViewsPerTweet(tweetsWithAddressViews, tweetsWithAddressCount);
-  const tweetsWithAddressFrequency = calculateTweetFrequencyTrendPercentage(tweetsWithAddressCount, 5, 3, 80);
-  const totalTweets_ = tweetsPerMinuteArray.reduce((sum, tweet) => sum + tweet.value, 0);
-  const totalTweets = NumberFormatter.formatNumber(totalTweets_);
-
-  const tweetPerFVmints = categorizeTweetsByInterval(tweetsPerMinuteArray, 5);
-  const tweetViewsRatioPercentage = calculateCumulativeRatioPercentage(
-    tweetPerFVmints,
-    tweetsPerViewsMinuteArray
-  );
-  const avgViewsPerTweet = calculateAverageViewsPerTweet(tweetsPerViewsMinuteArray, tweetsPerMinuteArray);
-  const tweetFrequencyTrend = calculateTweetFrequencyTrendPercentage(tweetsPerMinuteArray, 5, 5, 100);
-  const averagePercentageFv = calculateAveragePercentage(tweetPerFVmints);
-  
-  const averagePercentage = calculateAveragePercentage(tweetsPerMinuteArray);
-  const weighBasedImpression = computeImpressionsTimeSeries(engagementArray, 5);
-  const EWMA_Value = computeSEIEMA(weighBasedImpression, 14);
-  const SEI_value_x = computeTimeBasedSEI(engagementArray, 5);
-  const SEI_EMA = computeSEIEMA(SEI_value_x, 14);
-  const SEI_Velocity = computeOscillatingSEIVelocity(SEI_value_x, engagementArray, 15);
-  const SEI_value = getDynamicSpikes(SEI_value_x);
-  
-  const tweetFomo = computeTimeBasedFOMO(engagementArray, 2, 0.2);
-  const getMetricGrid = computeMetricsBins(engagementArray, 5, 5);
-  const compositFomo = computeCompositeFOMOIndex(getMetricGrid);
-  const macd = computeMACD(tweetFomo);
-  const RSI = computeRSI(tweetFomo);
-  const tweetFrequencyTrend_ = calculateTweetFrequencyTrendPercentage(tweetsPerMinuteArray, 5, 5, 100);
-  const currentTweetFrequencyTrend = tweetFrequencyTrend_[tweetFrequencyTrend_.length - 1]?.value || 0;
-  const timeseries = computeSentimentTimeSeries(validEntries);
-  const sentimentTrend = calculateSentimentTrend(timeseries, 30);
-  const currentSentimentTrend = sentimentTrend[sentimentTrend.length - 1]?.aggregatedSentiment || 0;
-  const tweetViewsPerFVmints = categorizeTweetsByIntervalC(tweetsPerViewsMinuteArray, 5);
-  const avgLstView = calculateAverageViewsPerTweet(tweetViewsPerFVmints.slice(-15), tweetViewsPerFVmints.slice(-15));
-  const currentTweetWiAddFrequencyTrend = tweetsWithAddressFrequency[tweetsWithAddressFrequency.length - 1]?.value || 0;
-  const tweetwithAddAvgViewsS = calculateAverageViewsPerTweet(tweetsWithAddressViews.slice(-15), tweetsWithAddressCount.slice(-15));
-
-  const sentiMeter = Math.round(calculateSentimentScore(currentTweetFrequencyTrend, currentSentimentTrend, avgLstView, Number(totalTweets)));
-  const sentiMeterAddr = Math.round(calculateSentimentScore(currentTweetWiAddFrequencyTrend, currentSentimentTrend, tweetwithAddAvgViewsS, totalTweetsWithAddress));
-
-  // Structure data for different function types
-  const frequency = { tweetFrequencyTrend, tweetsWithAddressFrequency };
-  const tweetperMinutes = { tweetsPerMinuteArray, tweetPerFVmints, tweetsWithAddressCount, totalTweets, averagePercentageFv, averagePercentage };
-  const SEI = { SEI_value, SEI_Velocity, SEI_EMA };
-  const Fomo = { tweetFomo, compositFomo, macd, RSI };
-  const impression = { weighBasedImpression, sentimentTrend, EWMA_Value };
-  const views = { tweetViewsPerFVmints, tweetsWithAddressViews, tweetViewsRatioPercentage, avgViewsPerTweet, tweetwithAddAvgViews };
-  const hype = { sentiMeter, sentiMeterAddr };
-  const tweetDetail = { extractedUsernames, extractedTweets, extractedView, extractedLikes, extractedTimes, extractedProfile };
-  
-  switch (funtype) {
-    case "frequency":
-      return {
-        frequency: {
-          tweetFrequencyTrend,
-          tweetsWithAddressFrequency
-        },
-        tweetDetail,
-        emojiArray
-      };
-      
-    case "tweetperMinutes": 
-      return {
-        tweetperMinutes,
-        tweetDetail,
-        emojiArray
-      };
-
-    case "SEI":
-      return {
-        SEI,
-        tweetDetail,
-        emojiArray
-      };
-    
-    case "Fomo":
-      return {
-        Fomo,
-        tweetDetail,
-        emojiArray
-      };
-      
-    case "impression":
-      return {
-        impression,
-        tweetDetail,
-        emojiArray
-      };
-  
-    case "views":
-      return {
-        views,
-        tweetDetail,
-        emojiArray
-      };
-      
-    case "hype":
-      return {
-        hype,
-        tweetDetail,
-        emojiArray
-      };
-      
-    default:
-      return {
-        frequency,
-        tweetperMinutes,
-        SEI,
-        Fomo,
-        impression,
-        views,
-        hype,
-        tweetDetail,
-        emojiArray
       };
   }
 }
-
-// Keep the existing paginateFrequencyData function
-function paginateFrequencyData(
-  limit: number,
-  page: number,
-  frequency?: {
-    tweetFrequencyTrend: Impression[],
-    tweetsWithAddressFrequency: Impression[],
-  },
-  tweetperMinutes?: {
-    tweetsPerMinuteArray: Impression[];
-    tweetPerFVmints: Impression[];
-    tweetsWithAddressCount: Impression[];
-    totalTweets: string;
-    averagePercentageFv: number;
-    averagePercentage: number;
-  },
-  SEI?: {
-    SEI_value: Impression[];
-    SEI_Velocity: Impression[];
-    SEI_EMA: Impression[];
-  },
-  Fomo?: {
-    tweetFomo: Impression[];
-    compositFomo: Impression[];
-    macd: MACDPoint[];
-    RSI: Impression[];
-  },
-  impression?: {
-    weighBasedImpression: Impression[];
-    sentimentTrend: TimeSeriess[];
-    EWMA_Value: Impression[];
-  },
-  views?: {
-    tweetViewsPerFVmints: CompImpression[];
-    tweetsWithAddressViews: CompImpression[];
-    tweetViewsRatioPercentage: Impression[];
-    avgViewsPerTweet: number;
-    tweetwithAddAvgViews: number;
-  },
-  hype?: {
-    sentiMeter: number;
-    sentiMeterAddr: number;
-  },
-  tweetDetail?: {
-    extractedUsernames: string[];
-    extractedTweets: string[];
-    extractedView: string[];
-    extractedLikes: string[];
-    extractedTimes: string[];
-    extractedProfile: string[];
-  },
-  emojiArray?: {
-    em_time: number;
-    emoji: string;
-  }[]
-) {
-  const result: any = {};
-  const sortByTimeDesc = <T extends { name?: string; time?: string }>(a: T, b: T) => {
-    const aTime = new Date(a.name ?? a.time ?? "").getTime();
-    const bTime = new Date(b.name ?? b.time ?? "").getTime();
-    return bTime - aTime;
-  };
-
-  // If limit and page are 0, return the full dataset for caching
-  // Otherwise, apply pagination
-  const shouldPaginate = limit > 0 && page > 0;
-  const start = shouldPaginate ? (page - 1) * limit : 0;
-  const end = shouldPaginate ? start + limit : undefined; // undefined means no end limit
-
-  const processArray = <T extends any[]>(array: T) => {
-    if (!array) return array;
+// Enhanced time parsing function that handles multiple formats
+function parseTimeToDate(timeStr: string): Date {
+  const now = new Date();
+  
+  // ISO 8601 with UTC or offset (e.g., "2025-07-13T23:42:42Z" or "+00:00")
+  if (/T.*(\+|-|Z)/.test(timeStr)) {
+    return new Date(timeStr); // Leave this as-is; UTC strings should stay in UTC
+  }
+  
+  // Locale string with date and time (e.g., "7/14/2025, 1:15:00 AM")
+  if (timeStr.includes('/') && timeStr.includes(',')) {
+    // Manual parsing to preserve exact time as UTC
+    const match = timeStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),\s+(\d{1,2}):(\d{2}):(\d{2})\s+(AM|PM)/i);
+    if (match) {
+      const [, month, day, year, hour, minute, second, ampm] = match;
+      let hours = parseInt(hour);
+      
+      if (ampm.toLowerCase() === 'pm' && hours !== 12) hours += 12;
+      if (ampm.toLowerCase() === 'am' && hours === 12) hours = 0;
+      
+      return new Date(Date.UTC(
+        parseInt(year),
+        parseInt(month) - 1,
+        parseInt(day),
+        hours,
+        parseInt(minute),
+        parseInt(second)
+      ));
+    }
     
-    const sorted = [...array].sort(sortByTimeDesc);
-    return shouldPaginate ? sorted.slice(start, end) : sorted;
-  };
+    // Fallback: try without seconds
+    const matchNoSeconds = timeStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),\s+(\d{1,2}):(\d{2})\s+(AM|PM)/i);
+    if (matchNoSeconds) {
+      const [, month, day, year, hour, minute, ampm] = matchNoSeconds;
+      let hours = parseInt(hour);
+      
+      if (ampm.toLowerCase() === 'pm' && hours !== 12) hours += 12;
+      if (ampm.toLowerCase() === 'am' && hours === 12) hours = 0;
+      
+      return new Date(Date.UTC(
+        parseInt(year),
+        parseInt(month) - 1,
+        parseInt(day),
+        hours,
+        parseInt(minute),
+        0
+      ));
+    }
+  }
+  
+  // Simple ISO 8601 without time zone (e.g., "2025-07-13T23:42")
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(timeStr)) {
+    const [datePart, timePart] = timeStr.split('T');
+    const [year, month, day] = datePart.split('-').map(Number);
+    const [hour, minute] = timePart.split(':').map(Number);
+    return new Date(Date.UTC(year, month - 1, day, hour, minute)); // Manually treat as UTC
+  }
+  
+  // Handle 12-hour format (e.g., "12:20 pm")
+  if (/\d{1,2}:\d{2}\s*(am|pm)/i.test(timeStr)) {
+    const [time, modifier] = timeStr.trim().split(/\s+/);
+    let [hours, minutes] = time.split(":").map(Number);
+    
+    if (modifier.toLowerCase() === "pm" && hours !== 12) hours += 12;
+    if (modifier.toLowerCase() === "am" && hours === 12) hours = 0;
+    
+    // Use UTC to preserve the exact time
+    const result = new Date(now);
+    result.setUTCHours(hours, minutes, 0, 0);
+    return result;
+  }
+  
+  // Handle 24-hour time (e.g., "23:42")
+  if (/^\d{2}:\d{2}$/.test(timeStr)) {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const result = new Date(now);
+    result.setUTCHours(hours, minutes, 0, 0);
+    return result;
+  }
+  
+  // Fallback
+  const parsed = new Date(timeStr);
+  return isNaN(parsed.getTime()) ? now : parsed;
+}
 
-  if (frequency) {
-    result.frequency = {
-      tweetFrequencyTrend: processArray(frequency.tweetFrequencyTrend),
-      tweetsWithAddressFrequency: processArray(frequency.tweetsWithAddressFrequency),
+
+// Enhanced helper function to normalize time input
+function normalizeTimeInput(timeStr: string): Date {
+  // If it's already a full date string, use it as is
+  if (timeStr.includes('/') || timeStr.includes('T') || timeStr.includes('-')) {
+    return parseTimeToDate(timeStr);
+  }
+  
+  // If it's just time (like "12:20 pm"), assume today's date
+  return parseTimeToDate(timeStr);
+}
+function filterTimeBasedArray<T extends { name: string }>(
+  array: T[], 
+  startTime: Date, 
+  endTime: Date
+): T[] {
+  if (!array || array.length === 0) return [];
+  
+  return array.filter(item => {
+    const itemTime = parseTimeToDate(item.name);
+    return itemTime >= startTime && itemTime <= endTime;
+  });
+}
+
+// Helper function to filter emojiArray (uses em_time timestamp)
+
+
+  // Helper function to filter emojiArray (uses em_time timestamp)
+  function filterEmojiArray(
+    array: Array<{ em_time: number; emoji: string }>, 
+    startTime: Date, 
+    endTime: Date
+  ): Array<{ em_time: number; emoji: string }> {
+    if (!array || array.length === 0) return [];
+    
+    const startTimestamp = startTime.getTime();
+    const endTimestamp = endTime.getTime();
+    
+    return array.filter(item => {
+      return item.em_time >= startTimestamp && item.em_time <= endTimestamp;
+    });
+  }
+  
+  // Helper function to filter tweetDetail arrays (uses extractedTimes for time reference)
+  function filterTweetDetailArrays(
+    tweetDetail: TweetData['tweetDetail'],
+    startTime: Date,
+    endTime: Date
+  ): TweetData['tweetDetail'] {
+    if (!tweetDetail.extractedTimes || tweetDetail.extractedTimes.length === 0) {
+      return {
+        extractedUsernames: [],
+        extractedUserfollowers:[],
+        extractedTweets: [],
+        extractedTimes: [],
+        extractedView: [],
+        extractedLikes: [],
+        extractedProfile: [],
+      };
+    }
+    
+    const filteredIndices: number[] = [];
+    
+    // Find indices where time falls within range
+    tweetDetail.extractedTimes.forEach((timeStr, index) => {
+      const itemTime = parseTimeToDate(timeStr);
+      if (itemTime >= startTime && itemTime <= endTime) {
+        filteredIndices.push(index);
+      }
+    });
+    
+    // Filter all arrays based on matching indices
+    return {
+      extractedUsernames: filteredIndices.map(i => tweetDetail.extractedUsernames[i] || ''),
+      extractedUserfollowers: filteredIndices.map(i => tweetDetail.extractedUserfollowers[i] || ''),
+      extractedTweets: filteredIndices.map(i => tweetDetail.extractedTweets[i] || ''),
+      extractedTimes: filteredIndices.map(i => tweetDetail.extractedTimes[i] || ''),
+      extractedView: filteredIndices.map(i => tweetDetail.extractedView[i] || ''),
+      extractedLikes: filteredIndices.map(i => tweetDetail.extractedLikes[i] || ''),
+      extractedProfile: filteredIndices.map(i => tweetDetail.extractedProfile[i] || ''),
     };
   }
-
-  if (tweetperMinutes) {
-    result.tweetperMinutes = {
-      tweetsPerMinuteArray: processArray(tweetperMinutes.tweetsPerMinuteArray),
-      tweetPerFVmints: processArray(tweetperMinutes.tweetPerFVmints),
-      tweetsWithAddressCount: processArray(tweetperMinutes.tweetsWithAddressCount),
-      totalTweets: tweetperMinutes.totalTweets,
-      averagePercentageFv: tweetperMinutes.averagePercentageFv,
-      averagePercentage: tweetperMinutes.averagePercentage,
+  
+  // Enhanced filtering function that filters each array individually
+  function filterDataByTime(data: TweetData, startTime: string, endTime: string): TweetData {
+    console.log(`FilteringX ${data.tweetperMinutes} from ${startTime} to ${endTime}`);
+    //console.dir(data, { depth: null, colors: true }); 
+    const start = normalizeTimeInput(startTime);
+    const end = normalizeTimeInput(endTime);
+    
+    // Handle case where end time is before start time (crossing midnight)
+    if (end < start) {
+      end.setDate(end.getDate() + 1);
+    }
+    
+    console.log(`Filtering data from ${start.toISOString()} to ${end.toISOString()}, normal time ${startTime} to ${endTime}`);
+    
+    // Filter tweetDetail arrays using extractedTimes as reference
+    const filteredTweetDetail = filterTweetDetailArrays(data.tweetDetail, start, end);
+    console.log(`Filtered tweetDetail: ${filteredTweetDetail.extractedTimes.length} items`);
+    // Filter emojiArray using em_time timestamp
+    const filteredEmojiArray = filterEmojiArray(data.emojiArray, start, end);
+    
+    // Filter all time-based arrays individually
+    const filteredFrequency = {
+      tweetFrequencyTrend: filterTimeBasedArray(data.frequency.tweetFrequencyTrend, start, end),
+      tweetsWithAddressFrequency: filterTimeBasedArray(data.frequency.tweetsWithAddressFrequency, start, end),
+    };
+    
+    const filteredTweetperMinutes = {
+      ...data.tweetperMinutes,
+      tweetsPerMinuteArray: filterTimeBasedArray(data.tweetperMinutes.tweetsPerMinuteArray, start, end),
+      tweetPerFVmints: filterTimeBasedArray(data.tweetperMinutes.tweetPerFVmints, start, end),
+      tweetsWithAddressCount: filterTimeBasedArray(data.tweetperMinutes.tweetsWithAddressCount, start, end),
+    };
+    
+    const filteredSEI = {
+      SEI_value: filterTimeBasedArray(data.SEI.SEI_value, start, end),
+      SEI_Velocity: filterTimeBasedArray(data.SEI.SEI_Velocity, start, end),
+      SEI_EMA: filterTimeBasedArray(data.SEI.SEI_EMA, start, end),
+    };
+    
+    const filteredFomo = {
+      tweetFomo: filterTimeBasedArray(data.Fomo.tweetFomo, start, end),
+      compositFomo: filterTimeBasedArray(data.Fomo.compositFomo, start, end),
+      macd: filterTimeBasedArray(data.Fomo.macd, start, end),
+      RSI: filterTimeBasedArray(data.Fomo.RSI, start, end),
+    };
+    
+    const filteredImpression = {
+      weighBasedImpression: filterTimeBasedArray(data.impression.weighBasedImpression, start, end),
+      sentimentTrend: filterTimeBasedArray(data.impression.sentimentTrend, start, end),
+      EWMA_Value: filterTimeBasedArray(data.impression.EWMA_Value, start, end),
+      tiredImpression: filterTimeBasedArray(data.impression.tiredImpression, start, end),
+      tieredAccountCount: filterTimeBasedArray(data.impression.tieredAccountCount, start, end),
+      tweetvelocityImpressions: filterTimeBasedArray(data.impression.tweetvelocityImpressions, start, end),
+    };
+    
+    const filteredViews = {
+      ...data.views,
+      tweetViewsPerFVmints: filterTimeBasedArray(data.views.tweetViewsPerFVmints, start, end),
+      tweetsWithAddressViews: filterTimeBasedArray(data.views.tweetsWithAddressViews, start, end),
+      tweetViewsRatioPercentage: filterTimeBasedArray(data.views.tweetViewsRatioPercentage, start, end),
+    };
+    
+    // Calculate total filtered items across all arrays for meta information
+    const totalFilteredItems = Math.max(
+      filteredTweetDetail.extractedTimes.length,
+      filteredFrequency.tweetFrequencyTrend.length,
+      filteredImpression.weighBasedImpression.length,
+      filteredViews.tweetViewsPerFVmints.length
+    );
+    
+    return {
+      ...data,
+      tweetDetail: filteredTweetDetail,
+      emojiArray: filteredEmojiArray,
+      frequency: filteredFrequency,
+      tweetperMinutes: filteredTweetperMinutes,
+      SEI: filteredSEI,
+      Fomo: filteredFomo,
+      impression: filteredImpression,
+      views: filteredViews,
+      meta: {
+        ...data.meta,
+        totalItems: totalFilteredItems,
+        totalPages: Math.ceil(totalFilteredItems / 1),
+      }
     };
   }
-
-  if (SEI) {
-    result.SEI = {
-      SEI_value: [...SEI.SEI_value].sort(sortByTimeDesc).slice(start, end),
-      SEI_Velocity: [...SEI.SEI_Velocity].sort(sortByTimeDesc).slice(start, end),
-      SEI_EMA: [...SEI.SEI_EMA].sort(sortByTimeDesc).slice(start, end),
-    };
+  
+  // Usage examples:
+  // filterDataByTime(data, "12:20 pm", "12:35 pm")
+  // filterDataByTime(data, "23:42", "23:59")
+  // filterDataByTime(data, "2025-07-13T23:40:00.000Z", "2025-07-14T01:15:00.000Z")
+  // filterDataByTime(data, "7/14/2025, 1:05:00 AM", "7/14/2025, 1:18:00 AM")
+  
+  // Debug function to help analyze time distribution in arrays
+  function analyzeTimeDistribution(data: TweetData): void {
+    console.log('=== Time Distribution Analysis ===');
+    
+    const arrays = [
+      { name: 'tweetDetail.extractedTimes', data: data.tweetDetail.extractedTimes },
+      { name: 'weighBasedImpression', data: data.impression.weighBasedImpression.map(item => item.name) },
+      { name: 'tweetFrequencyTrend', data: data.frequency.tweetFrequencyTrend.map(item => item.name) },
+      { name: 'tweetsPerMinuteArray', data: data.tweetperMinutes.tweetsPerMinuteArray.map(item => item.name) },
+      { name: 'SEI_value', data: data.SEI.SEI_value.map(item => item.name) },
+      { name: 'tweetViewsPerFVmints', data: data.views.tweetViewsPerFVmints.map(item => item.name) },
+    ];
+    
+    arrays.forEach(arr => {
+      if (arr.data && arr.data.length > 0) {
+        const firstTime = parseTimeToDate(arr.data[0]);
+        const lastTime = parseTimeToDate(arr.data[arr.data.length - 1]);
+        console.log(`${arr.name}: ${arr.data.length} items, from ${firstTime.toISOString()} to ${lastTime.toISOString()}`);
+      } else {
+        console.log(`${arr.name}: empty or undefined`);
+      }
+    });
+    
+    if (data.emojiArray && data.emojiArray.length > 0) {
+      const firstEmoji = new Date(data.emojiArray[0].em_time);
+      const lastEmoji = new Date(data.emojiArray[data.emojiArray.length - 1].em_time);
+      console.log(`emojiArray: ${data.emojiArray.length} items, from ${firstEmoji.toISOString()} to ${lastEmoji.toISOString()}`);
+    }
   }
-
-  if (Fomo) {
-    result.Fomo = {
-      tweetFomo: [...Fomo.tweetFomo].sort(sortByTimeDesc).slice(start, end),
-      compositFomo: [...Fomo.compositFomo].sort(sortByTimeDesc).slice(start, end),
-      macd: [...Fomo.macd].sort(sortByTimeDesc).slice(start, end),
-      RSI: [...Fomo.RSI].sort(sortByTimeDesc).slice(start, end),
-    };
-  }
-
-  if (impression) {
-    result.impression = {
-      weighBasedImpression: [...impression.weighBasedImpression].sort(sortByTimeDesc).slice(start, end),
-      sentimentTrend: [...impression.sentimentTrend].sort(sortByTimeDesc).slice(start, end),
-      EWMA_Value: [...impression.EWMA_Value].sort(sortByTimeDesc).slice(start, end),
-    };
-  }
-
-  if (views) {
-    result.views = {
-      tweetViewsPerFVmints: [...views.tweetViewsPerFVmints].sort(sortByTimeDesc).slice(start, end),
-      tweetsWithAddressViews: [...views.tweetsWithAddressViews].sort(sortByTimeDesc).slice(start, end),
-      tweetViewsRatioPercentage: [...views.tweetViewsRatioPercentage].sort(sortByTimeDesc).slice(start, end),
-      avgViewsPerTweet: views.avgViewsPerTweet,
-      tweetwithAddAvgViews: views.tweetwithAddAvgViews,
-    };
-  }
-
-  if (hype) {
-    result.hype = {
-      sentiMeter: hype.sentiMeter,
-      sentiMeterAddr: hype.sentiMeterAddr,
-    };
-  }
-
-  if (tweetDetail) {
-    const sortedTweetIndices = tweetDetail.extractedTimes
-      .map((time, idx) => ({ time: new Date(time).getTime(), idx }))
-      .sort((a, b) => b.time - a.time)
-      .map(item => item.idx);
-
-    const pagedTweetIndices = sortedTweetIndices.slice(start, end);
-
-    result.tweetDetail = {
-      extractedUsernames: pagedTweetIndices.map(i => tweetDetail.extractedUsernames[i]),
-      extractedTweets: pagedTweetIndices.map(i => tweetDetail.extractedTweets[i]),
-      extractedView: pagedTweetIndices.map(i => tweetDetail.extractedView[i]),
-      extractedLikes: pagedTweetIndices.map(i => tweetDetail.extractedLikes[i]),
-      extractedTimes: pagedTweetIndices.map(i => tweetDetail.extractedTimes[i]),
-      extractedProfile: pagedTweetIndices.map(i => tweetDetail.extractedProfile[i]),
-    };
-  }
-
-  if (emojiArray) {
-    result.emojiArray = [...emojiArray].sort((a, b) => b.em_time - a.em_time).slice(start, end);
-  }
-
-  result.meta = {
-    totalPages: frequency ? Math.ceil(frequency.tweetFrequencyTrend.length / limit) : 1,
-    currentPage: page,
-  };
-
-  return result;
-
-}*/

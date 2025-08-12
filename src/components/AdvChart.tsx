@@ -137,12 +137,23 @@ const TVChartContainer: React.FC<TVChartContainerProps> = ({
       volume: entry.volume,
     }));
     //console.log("Load Data D",datass)
-    emojiData.forEach(({ em_time, emoji }) => {
+   /* emojiData.forEach(({ em_time, emoji }) => {
       const emojiTime = typeof em_time === 'string' ? new Date(em_time).getTime() : em_time;
       const closestData = datass.find((dt) =>
         isTimestampIn15MinuteRange(emojiTime, dt.time)
       );
-      if (closestData) {
+     
+      if (!chartRef.current) {
+        console.error("❌ chartRef.current is null");
+      } else if (!('createShape' in chartRef.current)) {
+        console.error("❌ chartRef.current does not have 'createShape' method", chartRef.current);
+      } else if (typeof chartRef.current.createShape !== 'function') {
+        console.error("❌ chartRef.current.createShape is not a function", chartRef.current.createShape);
+      } else if (!closestData) {
+        console.error("❌ closestData is null or undefined");
+      } else if (!emojiTime) {
+        console.error("❌ Emoji is null or undefined");
+      }else {
         chartRef.current.createShape(
           { time: emojiTime / 1000, price: closestData.close },
           {
@@ -155,7 +166,7 @@ const TVChartContainer: React.FC<TVChartContainerProps> = ({
           }
         );
       }
-    });
+    });*/
   }, [emojiData, data]);
 
   // Similar effect for updating holders without reloading the chart

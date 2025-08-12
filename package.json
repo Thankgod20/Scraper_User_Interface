@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@metaplex-foundation/js": "^0.20.1",
     "@metaplex-foundation/umi": "^1.0.0",
     "@solana/web3.js": "^1.98.0",
@@ -38,7 +39,7 @@
     "@eslint/eslintrc": "^3",
     "@types/node": "^20",
     "@types/plotly.js": "^3.0.0",
-    "@types/react": "^19.0.4",
+    "@types/react": "^19.1.8",
     "@types/react-dom": "^19",
     "@types/react-modal": "^3.16.3",
     "@types/react-plotly.js": "^2.6.3",

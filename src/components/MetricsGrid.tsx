@@ -2,7 +2,7 @@
 import React, { JSX, useState, useEffect, ReactNode } from 'react';
 import Modal from "react-modal";
 import { QRCodeCanvas } from "qrcode.react";
-import { Signal as SignalIcon, Users as UsersIcon, Eye as EyeIcon, Download } from 'lucide-react';
+import { Signal as SignalIcon, Users as UsersIcon, Eye as EyeIcon, Download, Maximize2 } from 'lucide-react';
 
 // Child Components
 import LineGraph from "./LineGraph";
@@ -14,11 +14,17 @@ import MACDMainChart from './MacDMain';
 import RSIChart from './RSIChart';
 import LineGraphTimeD from "./LineGraphTimeD";
 import LineGraphTimeS from "./LineGraphTimeS";
+import TieredImpressionChart from './TieredImpression'
+import EMAVelocityChart from './EMAValocity'
+import TieredAccountLineChart from './TieredAccountLineChart';
+import DetailedImpressionChart from './DetailedImpressionChart';
+import AIAnalysisCard from './Narrative'
+import SentimentAnalyzer from './SentimentAnalyzer'
 import MarketDepthChart from './MarketDepth'; // If used directly, or part of OrderBookPanel
 import { CandleData, RawTradeData } from '@/app/types/TradingView';
 // Utils & Types
 import { NumberFormatter } from '@/app/utils/largeNumber';
-import { Impression, CompImpression, TimeSeriess, MACDPoint, Engagement, MetricsBin, EngagementImpression, InfoBoxProps } from "@/app/utils/app_types";
+import { Impression, CompImpression, TimeSeriess, MACDPoint, Engagement, MetricsBin, EngagementImpression, InfoBoxProps,TieredImpression ,TieredInfluence,TieredAccountCount,DetailedVImpression,AINarrativeResponse} from "@/app/utils/app_types";
 import { parseViewsCount, calculateSentimentScore } from '@/app/utils/holdersfunct'; // Assuming these are correctly defined
 
 type ZoomReport = {
@@ -67,7 +73,6 @@ const MetricCard: React.FC<MetricCardProps> = ({
   );
 };
 
-
 const InfoBox: React.FC<InfoBoxProps> = ({ title, value, icon }) => {
   return (
     <div className="bg-gray-700/50 backdrop-blur-sm rounded-lg p-4 shadow-md flex items-center hover:bg-gray-700 transition-colors">
@@ -109,7 +114,7 @@ const SentimentMeter: React.FC<SentimentMeterProps> = ({ score }) => {
           <line x1="50" y1="50" x2="50" y2="15" stroke={color} strokeWidth="2.5" />
           <circle cx="50" cy="50" r="3.5" fill={color} stroke="white" strokeWidth="0.5"/>
         </g>
-        <text x="50" y="40" textAnchor="middle" fontSize="10" fontWeight="bold" fill="white">{score.toFixed(0)}</text>
+        <text x="50" y="40" textAnchor="middle" fontSize="10" fontWeight="bold" fill="white">{(score ?? 0).toFixed(0)}</text>
       </svg>
       <div className="absolute bottom-[-10px] left-0 right-0 text-center text-xs font-semibold" style={{ color }}>
         {score < 25 ? "Extreme Fear" : score < 50 ? "Fear" : score < 75 ? "Greed" : "Extreme Greed"}
@@ -129,58 +134,125 @@ const ToggleButton = ({ active, onClick, children }: { active: boolean; onClick:
 );
 
 interface MetricsGridProps {
-  address: any; name: any; twitter: any;
+  address: any; name: any; twitter: any; symbol:any;
   Frequency: { tweetFrequencyTrend: Impression[]; tweetsWithAddressFrequency: Impression[]; };
   Tweets: { tweetPerMinut: Impression[]; tweetPerFVmints: Impression[]; tweetsWithAddressCount: Impression[]; };
-  Values: { totalTweets: string; averagePercentage: number; averagePercentageFv: number; };
-  SEI: { SEI_value: Impression[]; SEI_Velocity: Impression[]; };
+  Values: { totalTweets: string; averagePercentage: number; averagePercentageFv: number;numbottweet:number };
+  SEI: { SEI_value: Impression[]; SEI_Velocity: Impression[];SEI_EMA :Impression[]; };
   FOMO: { tweetFomo: Impression[]; macd: MACDPoint[]; RSIx: Impression[]; };
-  TweetImpression: { weighBasedImpression: Impression[]; sentimentTrend: TimeSeriess[]; EWMA_Value: Impression[]; };
+  TweetImpression: { weighBasedImpression: Impression[]; sentimentTrend: Impression[]; EWMA_Value: Impression[];tiredImpression: TieredInfluence[];tieredAccountCount: TieredAccountCount[]; tweetvelocityImpressions: DetailedVImpression[]};
   Views: { tweetViewsPerFVmints: CompImpression[]; tweetsWithAddressViews: CompImpression[]; tweetViewsRatioPercentage: Impression[]; };
   ViewsAlt: { avgViewsPerTweet: number; tweetwithAddAvgViews: number; };
   HypeMeter: { sentiMeter: number; sentiMeterAddr: number; };
   holders: { amount: number; price: number; time: string }[];
+  aiNarrative:AINarrativeResponse | null;
   live_prx: RawTradeData[];
   fetchOlderHoldingCount: (page: number, funtype: string) => Promise<ZoomReport>;
 }
 
 const MetricsGrid: React.FC<MetricsGridProps> = ({
-  address, name, twitter, Frequency, Tweets, Values, SEI, FOMO,
-  TweetImpression, Views, ViewsAlt, HypeMeter, holders, live_prx, fetchOlderHoldingCount
+  address, name, twitter,symbol, Frequency, Tweets, Values, SEI, FOMO,
+  TweetImpression, Views, ViewsAlt, HypeMeter, holders, live_prx,aiNarrative, fetchOlderHoldingCount
 }) => {
-  const [selectedMetric, setSelectedMetric] = useState<{ title: string; data: Impression[] | CompImpression[] | null } | null>(null);
-  const [selectedTimeMetric, setSelectedTimeMetric] = useState<{ title: string; data: TimeSeriess[]  } | null>(null);
-  const [selectedMacDMetric, setSelectedMacDMetric] = useState<{ title: string; data: MACDPoint[] } | null>(null);
+//console.log("tweetFrequencyTrend", Frequency.tweetFrequencyTrend,)
+ // console.log("TweetImpression",TweetImpression.tieredAccountCount,TweetImpression.tiredImpression)
+  const [selectedChart, setSelectedChart] = useState<{ component: React.ReactNode; title: string } | null>(null);
   
   const [activeTweetMetric, setActiveTweetMetric] = useState<'frequency' | 'address'>('frequency');
   const [activeCallerMetric, setActiveCallerMetric] = useState<'min' | 'fiveMin' | 'address'>('min');
-  const [activeImpressionMetric, setActiveImpressionMetric] = useState<'growth' | 'volatility' | 'peaks'>('growth');
-  const [activeEngagementMetric, setActiveEngagementMetric] = useState<'growth' | 'peaks'>('growth');
-  const [activeFomoMetric, setActiveFomoMetric] = useState<'growth' | 'macd' | 'rsi'>('growth'); // Changed 'peaks' to 'rsi' for FOMO
+  const [activeImpressionMetric, setActiveImpressionMetric] = useState<'growth' | 'volatility' | 'peaks' | 'account'>('growth');
+  const [activeEngagementMetric, setActiveEngagementMetric] = useState<'growth' | 'peaks' | 'peaksema'>('growth');
+  const [activeFomoMetric, setActiveFomoMetric] = useState<'growth' | 'macd' | 'rsi'>('growth');
   const [activeViewsMetric, setActiveViewsMetric] = useState<'average' | 'address' | 'ratio'>('average');
-
+  const [ainarrative,setAINarrative] = useState(false);
+  const [aiNarrativeData, setAiNarrativeData] = useState<AINarrativeResponse | null>(null);
   let twt = `https://x.com/search?q=${address}`;
   if (twitter) twt = twitter;
 
   const totalTweetsWithAddress = Tweets.tweetsWithAddressCount.reduce((sum, { value }) => sum + value, 0);
+  const lastTweet = TweetImpression.weighBasedImpression[0]?.name//FOMO.tweetFomo[FOMO.tweetFomo.length - 1]?.name;
+  const lastDate = new Date(lastTweet);
 
-  const openModal = (type: 'line' | 'time' | 'macd' | 'bar', title: string, data: any) => {
-    if (type === 'line') setSelectedMetric({ title, data });
-    else if (type === 'time') setSelectedTimeMetric({ title, data });
-    else if (type === 'macd') setSelectedMacDMetric({ title, data });
-    else if (type === 'bar') setSelectedMetric({ title, data }); // Use selectedMetric for bar too or create new state
+  // Step 2: Format function with full date and time
+const formatTime = (date: Date): string =>
+  date.toLocaleString('en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+
+// Step 3: Compute timeframe
+const timeframe = `${formatTime(new Date(lastDate.getTime() - 15 * 60 * 1000))} to ${formatTime(lastDate)}`;
+
+//console.log("TImeFrame",timeframe)
+  const openChartModal = (chartComponent: React.ReactNode, title: string) => {
+    setSelectedChart({ component: chartComponent, title });
+  };
+  const openAINarrativeModal = () => {
+    setAINarrative(true);
+    setAiNarrativeData(null); // Reset data before fetching
+    setAiNarrativeData(aiNarrative)
+    // Fetch AI narrative data here if needed
+    // Example: getAINarrativeAnalysis(tweets).then(data => setAiNarrativeData(data));
   };
   const closeModal = () => {
-    setSelectedMetric(null); setSelectedTimeMetric(null); setSelectedMacDMetric(null);
+    setSelectedChart(null);
+    setAINarrative(false)
   };
 
   useEffect(() => { Modal.setAppElement("#root-modal-element"); }, []); // Ensure #root-modal-element exists in your layout
 
   // Simplified CSV download function (implement actual CSV generation as before)
-  const downloadDataAsCSV = () => { console.log("Download CSV clicked"); /* Implement full CSV logic */ };
-
+  
   const isLoading = !Frequency || !Tweets || !Values || !SEI || !FOMO || !TweetImpression || !Views || !ViewsAlt || !HypeMeter;
 
+  // NEW: renderChartWithModalOption function
+  const renderChartWithModalOption = (chartComponent: React.ReactNode, title: string) => (
+    <div className="relative h-full group">
+      <div className="h-full w-full">
+        {chartComponent}
+      </div>
+      <button
+        onClick={() => openChartModal(chartComponent, title)}
+        className="absolute top-1 right-1 bg-gray-700/50 hover:bg-blue-600/80 p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+        title={`Expand ${title}`}
+        aria-label={`Expand ${title}`}
+      >
+        <Maximize2 size={14} className="text-gray-300 hover:text-white" />
+      </button>
+    </div>
+  );
+
+  // Helper function to get data for chart based on title
+  const getDataForChart = (title: string): Impression[] => {
+    if (title.includes("Tweet Frequency")) {
+      return activeTweetMetric === 'frequency' ? Frequency.tweetFrequencyTrend : Frequency.tweetsWithAddressFrequency;
+    }
+    if (title.includes("Callers")) {
+      if (activeCallerMetric === 'min') return Tweets.tweetPerMinut;
+      if (activeCallerMetric === 'fiveMin') return Tweets.tweetPerFVmints;
+      return Tweets.tweetsWithAddressCount;
+    }
+    if (title.includes("Impression")) {
+      if (activeImpressionMetric === 'growth') return TweetImpression.weighBasedImpression;
+      if (activeImpressionMetric === 'peaks') return TweetImpression.EWMA_Value;
+     
+      return TweetImpression.weighBasedImpression; // fallback
+    }
+    if (title.includes("FOMO")) {
+      return FOMO.tweetFomo;
+    }
+    if (title.includes("Engagement Velocity")) {
+      return SEI.SEI_Velocity;
+    }
+    if (title.includes("Views") && title.includes("Ratio")) {
+      return Views.tweetViewsRatioPercentage;
+    }
+    return []; // fallback
+  };
 
   const renderTweetFrequencyCard = () => {
     const data = activeTweetMetric === 'frequency' ? Frequency.tweetFrequencyTrend : Frequency.tweetsWithAddressFrequency;
@@ -192,8 +264,10 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({
     return (
       <MetricCard
         title={title} value={value} subText={subText} isPositiveChange={isPositive} isLoading={isLoading}
-        graph={<LineGraph data={data} color="#10B981" funtype='twtft' onZoomOrPan={fetchOlderHoldingCount} />}
-        onClick={() => openModal('line', title, data)}
+        graph={renderChartWithModalOption(
+          <LineGraph data={data} color="#10B981" funtype='twtft' onZoomOrPan={fetchOlderHoldingCount} />, 
+          title
+        )}
         toggleControls={
           <div className="flex space-x-1 mb-2">
             <ToggleButton active={activeTweetMetric === 'frequency'} onClick={() => setActiveTweetMetric('frequency')}>Overall Freq.</ToggleButton>
@@ -207,8 +281,8 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({
   const renderCallersCard = () => {
     let data, title, subText, value, percentageChange, isPositive;
     if (activeCallerMetric === 'min') {
-      data = Tweets.tweetPerMinut; title = "Callers/min (Avg.)";
-      value = Values.totalTweets; percentageChange = `${(Values.averagePercentage > 0 ? "+" : "")}${Values.averagePercentage.toFixed(2)}%`;
+      data = Tweets.tweetPerMinut; title = "Callers/min (Bot Calls)";
+      value = Values.totalTweets +` (${Values.numbottweet})`; percentageChange = `${(Values.averagePercentage > 0 ? "+" : "")}${Values.averagePercentage.toFixed(2)}%`;
       subText = `${Values.averagePercentage.toFixed(2)}% ${Values.averagePercentage > 0 ? "Increase" : "Decrease"} in tweets/min`;
       isPositive = Values.averagePercentage > 0;
     } else if (activeCallerMetric === 'fiveMin') {
@@ -225,8 +299,10 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({
     return (
       <MetricCard
         title={title} value={value} percentageChange={percentageChange} subText={subText} isPositiveChange={isPositive} isLoading={isLoading}
-        graph={<LineGraph data={data} color="#34D399" funtype='twt' onZoomOrPan={fetchOlderHoldingCount} />}
-        onClick={() => openModal('line', title, data)}
+        graph={renderChartWithModalOption(
+          <LineGraph data={data} color="#34D399" funtype='twt' onZoomOrPan={fetchOlderHoldingCount} />, 
+          title
+        )}
         toggleControls={
           <div className="flex space-x-1 mb-2">
             <ToggleButton active={activeCallerMetric === 'min'} onClick={() => setActiveCallerMetric('min')}>Per Min</ToggleButton>
@@ -239,27 +315,35 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({
   };
 
   const renderEngagementCard = () => {
-    let data, title, value, percentageChange, subText, isPositive, graphType;
+    let data, title, value, percentageChange, subText, isPositive, chartComponent;
     if (activeEngagementMetric === 'growth') {
         data = SEI.SEI_value; title = "Social Engagement Index";
         const lastSEI = SEI.SEI_value.length ? SEI.SEI_value[SEI.SEI_value.length - 1].value : 0;
         value = `${lastSEI.toFixed(2)}%`; percentageChange = `${lastSEI >= 0 ? '+' : ''}${lastSEI.toFixed(2)}%`;
-        subText = "Avg. engagement score"; isPositive = lastSEI >= 0; graphType = 'bar';
-    } else { // peaks
+        subText = "Avg. engagement score"; isPositive = lastSEI >= 0;
+        chartComponent = <BarGraph_Main data={data as Impression[]} />;
+    } else if(activeEngagementMetric === 'peaks') { // peaks
         data = SEI.SEI_Velocity; title = "Engagement Velocity";
         const lastVel = SEI.SEI_Velocity.length ? SEI.SEI_Velocity[SEI.SEI_Velocity.length - 1].value : 0;
         value = `${lastVel.toFixed(2)}%`; percentageChange = `${lastVel >= 0 ? '+' : ''}${lastVel.toFixed(2)}%`;
-        subText = "Rate of engagement change"; isPositive = lastVel > 0; graphType = 'line';
-    }
+        subText = "Rate of engagement change"; isPositive = lastVel > 0;
+        chartComponent = <LineGraph data={data as Impression[]} color="#8B5CF6" funtype='vlcrt' onZoomOrPan={fetchOlderHoldingCount} />;
+    } else { // peaks
+      data = SEI.SEI_EMA; title = "Engagement EMA";
+      const lastVel = SEI.SEI_EMA.length ? SEI.SEI_EMA[SEI.SEI_EMA.length - 1].value : 0;
+      value = `${lastVel.toFixed(2)}%`; percentageChange = `${lastVel >= 0 ? '+' : ''}${lastVel.toFixed(2)}%`;
+      subText = "Rate of engagement change"; isPositive = lastVel > 0;
+      chartComponent = <LineGraph data={data as Impression[]} color="#8B5CF6" funtype='vlcrt' onZoomOrPan={fetchOlderHoldingCount} />;
+  }
     return (
         <MetricCard
             title={title} value={value} percentageChange={percentageChange} subText={subText} isPositiveChange={isPositive} isLoading={isLoading}
-            graph={graphType === 'bar' ? <BarGraph_Main data={data as Impression[]} /> : <LineGraph data={data as Impression[]} color="#8B5CF6" funtype='vlcrt' onZoomOrPan={fetchOlderHoldingCount} />}
-            onClick={() => openModal(graphType === 'bar' ? 'bar' : 'line', title, data)}
+            graph={renderChartWithModalOption(chartComponent, title)}
             toggleControls={
                 <div className="flex space-x-1 mb-2">
                     <ToggleButton active={activeEngagementMetric === 'growth'} onClick={() => setActiveEngagementMetric('growth')}>SEI</ToggleButton>
                     <ToggleButton active={activeEngagementMetric === 'peaks'} onClick={() => setActiveEngagementMetric('peaks')}>Velocity</ToggleButton>
+                    <ToggleButton active={activeEngagementMetric === 'peaksema'} onClick={() => setActiveEngagementMetric('peaksema')}>SEI EMA</ToggleButton>
                 </div>
             }
         />
@@ -267,42 +351,39 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({
   };
 
   const renderFomoCard = () => {
-    let  value = "0%", percentageChange = "0%", subText = "", isPositive = false, graph, onClickHandler, graphType = 'line';
+    let value = "0%", percentageChange = "0%", subText = "", isPositive = false, chartComponent;
     const fomoData = FOMO.tweetFomo;
     const macdData = FOMO.macd;
-    const rsiData = FOMO.RSIx;
-    let data: Impression[] | MACDPoint[] | TimeSeriess[] = [];
-    let title = "FOMO Index"; // Default title, will be updated based on metric
+    const rsiData = TweetImpression.tiredImpression;
+    let title = "FOMO Index";
+    
     if (activeFomoMetric === 'growth' && fomoData.length > 0) {
         const lastVal = fomoData[fomoData.length - 1].value;
-        data = fomoData; title = "FOMO Growth"; value = `${lastVal.toFixed(2)}%`;
+        title = "FOMO Growth"; value = `${lastVal.toFixed(2)}%`;
         percentageChange = `${lastVal >= 0 ? "+" : ""}${lastVal.toFixed(2)}%`;
         subText = "Change in FOMO"; isPositive = lastVal >= 0;
-        graph = <LineGraph data={data} color="#8B5CF6" funtype='fmgwt' onZoomOrPan={fetchOlderHoldingCount} />;
-        onClickHandler = () => openModal('line', title, data);
+        chartComponent = <LineGraph data={fomoData} color="#8B5CF6" funtype='fmgwt' onZoomOrPan={fetchOlderHoldingCount} />;
     } else if (activeFomoMetric === 'macd' && macdData.length > 0) {
         const lastVal = macdData[macdData.length - 1].macd;
-        data = macdData; title = "FOMO MACD"; value = `${lastVal.toFixed(2)}`;
+        title = "FOMO MACD"; value = `${lastVal.toFixed(2)}`;
         percentageChange = `${lastVal >= 0 ? "+" : ""}${lastVal.toFixed(2)}`;
-        subText = "MACD of FOMO Index"; isPositive = lastVal >= 0; graphType = 'macd';
-        graph = <MACDChart data={data as MACDPoint[]} />;
-        onClickHandler = () => openModal('macd', title, data);
+        subText = "MACD of FOMO Index"; isPositive = lastVal >= 0;
+        chartComponent = <MACDChart data={macdData as MACDPoint[]} />;
     } else if (activeFomoMetric === 'rsi' && rsiData.length > 0) {
-        const lastVal = rsiData[rsiData.length - 1].value;
-        data = rsiData; title = "FOMO RSI"; value = `${lastVal.toFixed(2)}`;
-        percentageChange = ""; subText = "RSI of FOMO Index"; isPositive = lastVal < 70 && lastVal > 30; // Example
-        graph = <RSIChart rsiData={data as Impression[]} />;
-        onClickHandler = () => openModal('line', title, data); // RSIChart uses Impression[]
+        const lastVal = rsiData[rsiData.length - 1].whale.impressions;
+        title = "FOMO RSI"; value = `${lastVal.toFixed(2)}`;
+        percentageChange = ""; subText = "RSI of FOMO Index"; isPositive = lastVal < 70 && lastVal > 30;
+        chartComponent = <EMAVelocityChart data={rsiData as TieredInfluence[]} funtype="impgrw" onZoomOrPan={fetchOlderHoldingCount}/>
     } else {
-        // Default empty state or loading
         title = activeFomoMetric === 'growth' ? "FOMO Growth" : activeFomoMetric === 'macd' ? "FOMO MACD" : "FOMO RSI";
         subText = "Not enough data.";
-        graph = <div className="h-16 flex items-center justify-center text-gray-500">No Data</div>;
+        chartComponent = <div className="h-16 flex items-center justify-center text-gray-500">No Data</div>;
     }
+    
     return (
       <MetricCard
         title={title} value={value} percentageChange={percentageChange} subText={subText} isPositiveChange={isPositive} isLoading={isLoading}
-        graph={graph} onClick={onClickHandler}
+        graph={renderChartWithModalOption(chartComponent, title)}
         toggleControls={
           <div className="flex space-x-1 mb-2">
             <ToggleButton active={activeFomoMetric === 'growth'} onClick={() => setActiveFomoMetric('growth')}>Growth</ToggleButton>
@@ -315,40 +396,48 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({
   };
 
   const renderImpressionCard = () => {
-    let  title, value, percentageChange, subText, isPositive, graphType;
-    let data: Impression[] | TimeSeriess[] = [];
+    let title, value, percentageChange, subText, isPositive, chartComponent;
+    let data: Impression[] | TimeSeriess[] | TieredInfluence[] | DetailedVImpression[] = [];
+    
     if (activeImpressionMetric === 'growth' && TweetImpression.weighBasedImpression.length > 0) {
         const lastVal = TweetImpression.weighBasedImpression[TweetImpression.weighBasedImpression.length - 1].value;
         data = TweetImpression.weighBasedImpression; title = "Impression Growth"; value = `${isNaN(lastVal) ? 0 : lastVal.toFixed(2)}%`;
         percentageChange = `${(isNaN(lastVal) || lastVal < 0) ? "" : "+"}${isNaN(lastVal) ? 0 : lastVal.toFixed(2)}%`;
-        subText = "Weighted impression change"; isPositive = !isNaN(lastVal) && lastVal >= 0; graphType = 'line';
+        subText = "Weighted impression change"; isPositive = !isNaN(lastVal) && lastVal >= 0;
+        chartComponent = <LineGraph data={data as Impression[]} color="#10B981" funtype='impgrw' onZoomOrPan={fetchOlderHoldingCount} />;
     } else if (activeImpressionMetric === 'volatility' && TweetImpression.sentimentTrend.length > 0) {
-        const lastVal = TweetImpression.sentimentTrend[TweetImpression.sentimentTrend.length - 1].aggregatedSentiment;
+        const lastVal = TweetImpression.sentimentTrend[0].value;
         data = TweetImpression.sentimentTrend; title = "Sentiment Volatility"; value = lastVal.toFixed(2);
-        percentageChange = "Variability"; subText = "Sentiment variability"; isPositive = lastVal < 1; graphType = 'time';
-    } else if (activeImpressionMetric === 'peaks' && TweetImpression.EWMA_Value.length > 0) {
-        const lastVal = TweetImpression.EWMA_Value[TweetImpression.EWMA_Value.length-1].value;
-        data = TweetImpression.EWMA_Value; title = "Impression EWMA"; value = lastVal.toFixed(2);
-        percentageChange = "Smoothed Peaks"; subText = "Exponential Moving Average of Impressions"; isPositive = lastVal > 0; graphType = 'line';
-    } else {
-        // Fallback for empty data
+        percentageChange = "Variability"; subText = "Sentiment variability"; isPositive = lastVal < 1;
+        chartComponent =<LineGraph data={data as Impression[]} color="#10B981" funtype='impgrw' onZoomOrPan={fetchOlderHoldingCount} />;
+    } else if (activeImpressionMetric === 'peaks' && TweetImpression.tiredImpression.length > 0) {
+        const lastVal = TweetImpression.tiredImpression[TweetImpression.tiredImpression.length-1].whale;
+        data = TweetImpression.tiredImpression; title = "Impression EWMA"; value = lastVal.engagement.toFixed(2);
+        percentageChange = "Smoothed Peaks"; subText = "Exponential Moving Average of Impressions"; isPositive = lastVal.engagement > 0;
+        chartComponent = <TieredImpressionChart data={data as TieredInfluence[]} funtype="impgrw" onZoomOrPan={fetchOlderHoldingCount}/>
+    
+    }  else if (activeImpressionMetric === 'account' && TweetImpression.tweetvelocityImpressions.length > 0) {
+      const lastVal = TweetImpression.tweetvelocityImpressions[TweetImpression.tweetvelocityImpressions.length-1].newUniqueViewers;
+      data = TweetImpression.tweetvelocityImpressions; title = "Impression EWMA"; value = lastVal.toFixed(2);
+      percentageChange = "Smoothed Peaks"; subText = "Exponential Moving Average of Impressions"; isPositive = lastVal > 0;
+      chartComponent = <DetailedImpressionChart data={data as DetailedVImpression[]} funtype="impgrw" onZoomOrPan={fetchOlderHoldingCount}/>
+  
+  } else {
         title = "Impression Data"; subText = "No data available"; value="N/A"; percentageChange="N/A"; isPositive = false;
-        data = []; graphType = 'line'; // Default, won't render much
+        data = [];
+        chartComponent = <div className="h-16 flex items-center justify-center text-gray-500">No Data</div>;
     }
 
     return (
         <MetricCard
             title={title} value={value} percentageChange={percentageChange} subText={subText} isPositiveChange={isPositive} isLoading={isLoading}
-            graph={
-                graphType === 'time' ? <LineGraphTimeS data={data as TimeSeriess[]} color="#F59E0B" /> :
-                <LineGraph data={data as Impression[]} color={activeImpressionMetric === 'growth' ? "#10B981" : "#EF4444"} funtype='impgrw' onZoomOrPan={fetchOlderHoldingCount} />
-            }
-            onClick={() => openModal(graphType as any, title, data)}
+            graph={renderChartWithModalOption(chartComponent, title)}
             toggleControls={
                 <div className="flex space-x-1 mb-2">
                     <ToggleButton active={activeImpressionMetric === 'growth'} onClick={() => setActiveImpressionMetric('growth')}>Growth</ToggleButton>
                     <ToggleButton active={activeImpressionMetric === 'volatility'} onClick={() => setActiveImpressionMetric('volatility')}>Volatility</ToggleButton>
                     <ToggleButton active={activeImpressionMetric === 'peaks'} onClick={() => setActiveImpressionMetric('peaks')}>EWMA</ToggleButton>
+                    <ToggleButton active={activeImpressionMetric === 'account'} onClick={() => setActiveImpressionMetric('account')}>Account</ToggleButton>
                 </div>
             }
         />
@@ -356,27 +445,26 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({
   };
   
   const renderViewsCard = () => {
-    let data, title, value, subText, isPositive, graphType;
+    let data, title, value, subText, isPositive, chartComponent;
     if (activeViewsMetric === 'average') {
         data = Views.tweetViewsPerFVmints; title = "Avg. Views/Tweet"; value = NumberFormatter.formatNumber(Number(ViewsAlt.avgViewsPerTweet.toFixed(2)));
-        subText = "Overall average views per tweet"; isPositive = ViewsAlt.avgViewsPerTweet >= 0; graphType = 'bar';
+        subText = "Overall average views per tweet"; isPositive = ViewsAlt.avgViewsPerTweet >= 0;
+        chartComponent = <BarGraph data={data as CompImpression[]} />;
     } else if (activeViewsMetric === 'address') {
         data = Views.tweetsWithAddressViews; title = "Views for Tweets w/ Address (5min)"; value = NumberFormatter.formatNumber(Number(ViewsAlt.tweetwithAddAvgViews.toFixed(2)));
-        subText = "Aggregated views for tweets with address"; isPositive = Views.tweetsWithAddressViews.length > 0 && Views.tweetsWithAddressViews[Views.tweetsWithAddressViews.length-1].value > 0; graphType = 'bar';
+        subText = "Aggregated views for tweets with address"; isPositive = Views.tweetsWithAddressViews.length > 0 && Views.tweetsWithAddressViews[Views.tweetsWithAddressViews.length-1].value > 0;
+        chartComponent = <BarGraph data={data as CompImpression[]} />;
     } else { // ratio
         data = Views.tweetViewsRatioPercentage; title = "Tweet Count / Avg Views Ratio"; 
         const ratioVal = (Number(parseViewsCount(Values.totalTweets))/ViewsAlt.avgViewsPerTweet)*100;
         value = isNaN(ratioVal) ? "0%" : `${NumberFormatter.formatNumber(Number(ratioVal.toFixed(2)))}%`;
-        subText = "Caller interest vs. viewership"; isPositive = ViewsAlt.avgViewsPerTweet >= 0; graphType = 'line';
+        subText = "Caller interest vs. viewership"; isPositive = ViewsAlt.avgViewsPerTweet >= 0;
+        chartComponent = <LineGraph data={data as Impression[]} color="#3B82F6" funtype='avtwavvw' onZoomOrPan={fetchOlderHoldingCount} />;
     }
     return (
         <MetricCard
             title={title} value={value} subText={subText} isPositiveChange={isPositive} isLoading={isLoading}
-            graph={
-                graphType === 'bar' ? <BarGraph data={data as CompImpression[]} /> :
-                <LineGraph data={data as Impression[]} color="#3B82F6" funtype='avtwavvw' onZoomOrPan={fetchOlderHoldingCount} />
-            }
-            onClick={() => openModal(graphType === 'bar' ? 'bar' : 'line', title, data)}
+            graph={renderChartWithModalOption(chartComponent, title)}
             toggleControls={
                 <div className="flex space-x-1 mb-2">
                     <ToggleButton active={activeViewsMetric === 'average'} onClick={() => setActiveViewsMetric('average')}>Average</ToggleButton>
@@ -391,6 +479,7 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({
   return (
     <div className="bg-gray-850 text-white rounded-lg p-3 shadow-lg w-full h-full flex flex-col">
       <div id="root-modal-element"></div> {/* For Modal accessibility */}
+      
       <div className="flex items-center justify-between mb-4 p-2 bg-gray-800 rounded-md">
         <div className="flex items-center">
             {name && <img src={name} alt="Token" className="w-10 h-10 rounded-full mr-3 border-2 border-gray-700"/>}
@@ -415,8 +504,8 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({
       </div>
       
       <div className="mb-4">
-        <button onClick={downloadDataAsCSV} className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-3 rounded-lg font-semibold text-xs transition-colors flex items-center justify-center">
-          <Download size={14} className="mr-2"/> Download Plot Data (CSV)
+        <button onClick={openAINarrativeModal} className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 px-3 rounded-lg font-semibold text-xs transition-colors flex items-center justify-center">
+           Token Narrative 
         </button>
       </div>
       
@@ -432,6 +521,7 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({
             <InfoBox title="Holders" value={NumberFormatter.formatNumber(holders.length)} icon={<UsersIcon size={20} />} />
             <InfoBox title="Tweet Views (Avg)" value={NumberFormatter.formatNumber(Math.round(ViewsAlt.avgViewsPerTweet))} icon={<EyeIcon size={20} />} />
         </div>
+        
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <div className="bg-gray-800 p-3 rounded-lg shadow-lg">
                 <h3 className="text-sm text-center font-semibold mb-1 text-gray-300">Hype Meter</h3>
@@ -444,30 +534,56 @@ const MetricsGrid: React.FC<MetricsGridProps> = ({
         </div>
       </div>
 
+      {/* Modal for expanded chart view */}
+
+      
       <Modal
-        isOpen={!!selectedMetric || !!selectedTimeMetric || !!selectedMacDMetric}
+      isOpen={ainarrative}
+      onRequestClose={closeModal}
+      contentLabel="Chart Details"
+      className="bg-gray-900 text-white mx-auto my-auto rounded-lg p-4 shadow-2xl flex flex-col w-[90vw] max-w-3xl max-h-[90vh] overflow-y-auto"
+      overlayClassName="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-[1000]"
+    >
+      <div className="flex justify-between items-center mb-3 flex-shrink-0">
+        <h3 className="text-lg font-bold text-blue-300">
+          {selectedChart?.title}
+        </h3>
+        <button 
+          className="bg-red-600 hover:bg-red-700 text-white py-1 px-3 rounded-lg font-semibold transition-colors"
+          onClick={closeModal}
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Make the content inside the modal scrollable if needed */}
+      <div className="overflow-y-auto">
+        <SentimentAnalyzer address_={address} symbol_={symbol} timeframe_={timeframe} />
+      </div>
+    </Modal>
+
+
+      <Modal
+        isOpen={!!selectedChart}
         onRequestClose={closeModal}
-        contentLabel="Metric Details"
-        className="bg-gray-900 text-white w-[90vw] max-w-[1200px] h-[80vh] mx-auto my-auto rounded-lg p-4 shadow-2xl flex flex-col"
+        contentLabel="Chart Details"
+        className="bg-gray-900 text-white w-[90vw] max-w-[1200px] h-[70vh] mx-auto my-auto rounded-lg p-4 shadow-2xl flex flex-col"
         overlayClassName="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-[1000]"
       >
-        <h3 className="text-lg font-bold mb-3 text-blue-300 flex-shrink-0">
-          {selectedMetric?.title || selectedTimeMetric?.title || selectedMacDMetric?.title}
-        </h3>
-        <div className="flex-grow overflow-hidden">
-          {selectedMetric && (selectedMetric.title.includes("View") || selectedMetric.title.includes("Engagement Index")) ? (
-            <BarGraph_Main data={selectedMetric.data as Impression[]} />
-          ) : selectedMetric ? (
-            <DLineGraph data={selectedMetric.data as Impression[]} color="#3B82F6" detailed />
-          ) : selectedTimeMetric ? (
-            <LineGraphTimeD data={selectedTimeMetric.data} color="#3B82F6" />
-          ) : selectedMacDMetric ? (
-            <MACDMainChart data={selectedMacDMetric.data} />
-          ) : null}
+        <div className="flex justify-between items-center mb-3 flex-shrink-0">
+          <h3 className="text-lg font-bold text-blue-300">
+            {selectedChart?.title}
+          </h3>
+          <button 
+            className="bg-red-600 hover:bg-red-700 text-white py-1 px-3 rounded-lg font-semibold transition-colors"
+            onClick={closeModal}
+          >
+            ✕
+          </button>
         </div>
-        <button className="mt-4 bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-lg font-semibold self-end transition-colors flex-shrink-0" onClick={closeModal}>
-          Close
-        </button>
+        <div className="flex-grow overflow-hidden">
+          {selectedChart?.component}
+        </div>
       </Modal>
     </div>
   );

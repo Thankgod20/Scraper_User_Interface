@@ -125,7 +125,7 @@ const OrderBookPanel: React.FC<OrderBookPanelProps> = ({
       </div>
 
       {/* Secondary Charts Area (Advanced Analytics) */}
-      <div className="flex flex-col bg-gray-800/40 backdrop-blur-sm rounded-xl border border-gray-700/50 shadow-xl overflow-hidden flex-[1_1_55%]">
+      <div className="flex flex-col bg-gray-800/40 backdrop-blur-sm rounded-xl border border-gray-700/50 shadow-xl overflow-auto flex-[1_1_55%]">
         <div className="p-3 border-b border-gray-700/50 bg-gray-800/60">
             <h3 className="text-xs font-semibold text-gray-300 mb-2 text-center sr-only">Advanced Analytics</h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
@@ -185,7 +185,7 @@ const OrderBookPanel: React.FC<OrderBookPanelProps> = ({
             <X size={20} />
           </button>
         </div>
-        <div className="flex-grow overflow-hidden p-4">
+        <div className="flex-grow overflow-auto p-4">
           {modalContent}
         </div>
       </Modal>

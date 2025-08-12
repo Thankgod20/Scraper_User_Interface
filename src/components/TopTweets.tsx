@@ -18,7 +18,7 @@ const TweetCard: React.FC<TweetCardProps> = ({
     viewsCount,
 }) => {
     return (
-        <div className="bg-gray-900 text-white p-4 rounded-lg shadow-md w-72 flex-shrink-0 overflow-x-auto">
+        <div className="bg-gray-900 text-white p-4 rounded-lg shadow-md w-[100%] flex-shrink-0 overflow-x-auto">
             {/* Header: Profile and Timestamp */}
             <div className="flex items-center mb-3">
                 <img
@@ -73,16 +73,20 @@ const TopTweets: React.FC<TweetTopProps> = ({ username, tweets_, likes, viewscou
         username: user,
         timestamp: timestamp[index], // Example timestamp, you can use a real one if available
         content: tweets_[index],
-        lightningCount: likes[index][likes[index].length - 1], // Assuming `likes` corresponds to lightning reactions
-        viewsCount: viewscount[index][viewscount[index].length - 1],
+        //lightningCount: likes[index][likes[index].length - 1], // Assuming `likes` corresponds to lightning reactions
+        lightningCount: Array.isArray(likes[index]) && likes[index].length > 0
+  ? likes[index][likes[index].length - 1]
+  : 0, // fallback if undefined or empty
+
+        viewsCount: Array.isArray(viewscount[index]) ? viewscount[index][0] : "0",
     })).sort((a, b) => parseViewsCount(b.viewsCount) - parseViewsCount(a.viewsCount))
         .slice(0, 10);;
     return (
         <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
             <h2 className="text-white text-lg font-bold mb-4">Top Tweets</h2>
-            <div className="flex space-x-4 overflow-x-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {tweets.map((tweet, index) => (
-                    <TweetCard key={index} {...tweet} />
+                <TweetCard key={index} {...tweet} />
                 ))}
             </div>
         </div>

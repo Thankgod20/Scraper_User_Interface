@@ -12,7 +12,9 @@ Chart.Chart.register(
   Chart.Title,
   Chart.Tooltip,
   Chart.Legend,
-  Chart.Filler
+  Chart.Filler,
+  Chart.BarController,
+  Chart.LineController,
 );
 
 type ZoomReport = {
